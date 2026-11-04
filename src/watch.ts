@@ -121,3 +121,63 @@ export async function notifyFamily(deps: Deps, msg: LineMessage, kind: string): 
   await logSend(db, kind, now, family.length, success);
   return { target: family.length, success };
 }
+
+// ---- デモモード（§16.2）：DEMO_MODE=true のときだけ、管理者が使える ----
+// 時刻や「登録した当日は送らない」の決まりを無視して、すぐに実行する。対象は登録済みの親全員。
+
+export type DemoCommand = 'morning' | 'reminder' | 'noon' | 'reset';
+
+export async function runDemo(deps: Deps, command: DemoCommand): Promise<string> {
+  const { db, now } = deps;
+  const today = toJst(now).date;
+  const parents = await listParents(db);
+  if (parents.length === 0) return '親御さんがまだ登録されていません。';
+  const results: string[] = [];
+
+  for (const parent of parents) {
+    const name = parent.display_name ?? 'ご家族';
+    if (command === 'reset') {
+      await db.prepare(`DELETE FROM daily_status WHERE parent_id = ? AND date = ?`).bind(parent.id, today).run();
+      results.push(`${name}：今日の記録を消しました`);
+      continue;
+    }
+    const day = await getDay(db, parent.id, today);
+    const greeting = await todaysGreeting(deps, today);
+
+    if (command === 'morning') {
+      await db
+        .prepare(`UPDATE daily_status SET morning_sent_at = ?, morning_failed = 0 WHERE parent_id = ? AND date = ?`)
+        .bind(now, parent.id, today)
+        .run();
+      const ok = await pushCounted(deps, parent, morningMessage(greeting), 'morning');
+      if (!ok) await markMorningFailed(db, parent.id, today);
+      results.push(`${name}：朝のメッセージを${ok ? '送りました' : '送れませんでした'}`);
+    } else if (command === 'reminder') {
+      if (day.firstReplyAt !== null) {
+        results.push(`${name}：お返事があるので、リマインドは送りません`);
+        continue;
+      }
+      await db
+        .prepare(`UPDATE daily_status SET reminder_sent_at = ? WHERE parent_id = ? AND date = ?`)
+        .bind(now, parent.id, today)
+        .run();
+      const ok = await pushCounted(deps, parent, morningMessage(greeting, true), 'reminder');
+      results.push(`${name}：リマインドを${ok ? '送りました' : '送れませんでした'}`);
+    } else {
+      await db
+        .prepare(`UPDATE daily_status SET noon_checked_at = ? WHERE parent_id = ? AND date = ?`)
+        .bind(now, parent.id, today)
+        .run();
+      const outcome = noonOutcome(day);
+      if (outcome === 'replied') {
+        results.push(`${name}：お返事があるので、お知らせは送りません`);
+        continue;
+      }
+      const msg = outcome === 'morning_failed' ? familyMorningFailed(name) : familyNoReply(name);
+      const { success, target } = await notifyFamily(deps, msg, 'noon');
+      await markNoonNotified(db, parent.id, today);
+      results.push(`${name}：ご家族${target}人中${success}人にお知らせしました`);
+    }
+  }
+  return `【デモ】\n${results.join('\n')}`;
+}

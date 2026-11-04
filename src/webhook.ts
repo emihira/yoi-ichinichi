@@ -48,12 +48,20 @@ import {
 } from './line/messages';
 import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, UNWELL_DEBOUNCE_MS } from './rules';
 import { DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
-import { notifyFamily, type Deps } from './watch';
+import { notifyFamily, runDemo, type DemoCommand, type Deps } from './watch';
 
 export const MAX_PARENTS = 2;
 export const MAX_FAMILY = 3;
 const CONVERSATION_TTL_MS = 10 * MINUTE_MS;
 const PARENT_NAME_MAX = 10;
+
+/** デモ用コマンド（§16.2）。「デモ:朝」のような半角コロンも受け付ける */
+const DEMO_COMMANDS: Record<string, DemoCommand> = {
+  'デモ：朝': 'morning',
+  'デモ：リマインド': 'reminder',
+  'デモ：正午': 'noon',
+  'デモ：リセット': 'reset',
+};
 
 /** LINE から届くイベントのうち、使う部分だけ */
 export interface LineEvent {
@@ -270,6 +278,12 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   // 家族が親用の登録リンクを押してしまった場合
   if (looksLikeInviteCode(input)) {
     await reply(ctx, event, text('すでにご家族として登録されています。このリンクはご両親のスマートフォンで開いてください。'));
+    return;
+  }
+
+  const demo = DEMO_COMMANDS[input.replace(/[:：]\s*/, '：')];
+  if (demo && isAdmin && ctx.env.DEMO_MODE === 'true') {
+    await reply(ctx, event, text(await runDemo(deps(ctx), demo)));
     return;
   }
 
