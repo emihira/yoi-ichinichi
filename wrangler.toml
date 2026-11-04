@@ -1,0 +1,21 @@
+name = "yoi-ichinichi"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Cron式はUTC（協定世界時）。日本時間への変換はコード側で行う（仕様書 §3.4）
+[triggers]
+crons = [
+  "*/5 20-23,0-3 * * *", # 見守り処理：日本時間 5:00〜12:55、5分ごと
+  "0 19 * * *"           # 日次メンテナンス：日本時間 4:00
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "yoi-ichinichi"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+LINE_OA_ID = ""          # LINE公式アカウントのベーシックID（例：@123abcde）
+GREETING_API_URL = ""    # 共通挨拶文の配信先。空なら予備挨拶文を使う
+DEMO_MODE = "false"

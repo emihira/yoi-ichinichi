@@ -1,0 +1,5 @@
+# ローカル開発用の秘密情報（このファイルを .dev.vars にコピーして値を入れる）
+# .dev.vars は git に入りません。本番は `npx wrangler secret put <名前>` で登録します。
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+ADMIN_SETUP_CODE=
