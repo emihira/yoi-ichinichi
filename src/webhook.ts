@@ -1,19 +1,59 @@
-// LINE からのイベントの処理（仕様書 §5, §6, §9）
+// LINE からのイベントの処理（仕様書 §5, §6, §9, §10）
 
 import {
+  addInviteAttempt,
+  claimUnwellCancel,
+  claimUnwellNotice,
+  clearConversation,
+  countUsers,
+  createInvite,
+  findInvite,
+  getConversation,
   getUserByLineId,
+  insertUser,
   markEventProcessed,
   markThanksSent,
+  recentInviteAttempts,
   recordFirstReply,
   registerAdmin,
+  resetUnwellNotice,
+  setConversation,
+  useInvite,
   type UserRow,
 } from './db';
 import type { Env } from './env';
-import { looksLikeInviteCode } from './invite';
+import {
+  canAttemptInvite,
+  generateInviteCode,
+  hashInviteCode,
+  INVITE_ATTEMPT_WINDOW_MS,
+  INVITE_TTL_MS,
+  isInviteUsable,
+  looksLikeInviteCode,
+} from './invite';
 import { createLineClient, type LineClient } from './line/client';
-import { text, THANKS } from './line/messages';
-import { classifyReply, isBeforeNoon } from './rules';
-import { toJst } from './time';
+import {
+  ASK_INVITE_CODE,
+  familyUnwell,
+  familyUnwellCancelled,
+  FAMILY_NOTICE,
+  inviteChoice,
+  text,
+  THANKS,
+  UNWELL_ALL_FAILED,
+  UNWELL_CANCELLED,
+  UNWELL_RECENTLY_SENT,
+  unwellAckMessage,
+  usageText,
+} from './line/messages';
+import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, UNWELL_DEBOUNCE_MS } from './rules';
+import { DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
+import { notifyFamily, type Deps } from './watch';
+
+export const MAX_PARENTS = 2;
+export const MAX_FAMILY = 3;
+const CONVERSATION_TTL_MS = 10 * MINUTE_MS;
+const PARENT_NAME_MAX = 10;
 
 /** LINE から届くイベントのうち、使う部分だけ */
 export interface LineEvent {
@@ -30,10 +70,18 @@ interface Ctx {
   db: D1Database;
   line: LineClient;
   now: number;
+  today: string;
 }
 
 export async function handleEvents(env: Env, events: LineEvent[]): Promise<void> {
-  const ctx: Ctx = { env, db: env.DB, line: createLineClient(env.LINE_CHANNEL_ACCESS_TOKEN), now: Date.now() };
+  const now = Date.now();
+  const ctx: Ctx = {
+    env,
+    db: env.DB,
+    line: createLineClient(env.LINE_CHANNEL_ACCESS_TOKEN),
+    now,
+    today: toJst(now).date,
+  };
   for (const event of events) {
     try {
       // 同じイベントが再送されても、2回処理しない（§13.4）
@@ -43,6 +91,15 @@ export async function handleEvents(env: Env, events: LineEvent[]): Promise<void>
       console.error('イベント処理でエラー', event.type, e);
     }
   }
+}
+
+function deps(ctx: Ctx): Deps {
+  return { db: ctx.db, line: ctx.line, greetingApiUrl: ctx.env.GREETING_API_URL, now: ctx.now };
+}
+
+async function reply(ctx: Ctx, event: LineEvent, ...messages: Parameters<LineClient['reply']>[1]): Promise<boolean> {
+  if (!event.replyToken) return false;
+  return ctx.line.reply(event.replyToken, messages);
 }
 
 async function handleEvent(ctx: Ctx, event: LineEvent): Promise<void> {
@@ -58,62 +115,213 @@ async function handleEvent(ctx: Ctx, event: LineEvent): Promise<void> {
 // ---- 登録前の人（§9.2, §9.9） ----
 
 async function handleUnregistered(ctx: Ctx, event: LineEvent, userId: string): Promise<void> {
-  if (!event.replyToken) return;
-  if (event.type === 'follow') {
-    return void ctx.line.reply(event.replyToken, [text('招待コードを送ってください。')]);
-  }
   if (event.type !== 'message' || event.message?.type !== 'text') {
-    return void ctx.line.reply(event.replyToken, [text('招待コードを送ってください。')]);
+    if (event.type === 'follow' || event.type === 'message') await reply(ctx, event, ASK_INVITE_CODE);
+    return;
   }
   const input = event.message.text ?? '';
 
   // 最初の管理者登録：管理者コードと一致し、管理者がまだいないときだけ
   if (ctx.env.ADMIN_SETUP_CODE && input.trim() === ctx.env.ADMIN_SETUP_CODE) {
-    const ok = await registerAdmin(ctx.db, userId, ctx.now, toJst(ctx.now).date);
-    if (ok) {
-      return void ctx.line.reply(event.replyToken, [
+    if (await registerAdmin(ctx.db, userId, ctx.now, ctx.today)) {
+      await reply(
+        ctx,
+        event,
         text('管理者として登録しました。「しょうたい」と送ると、ご家族や親御さんを招待できます。'),
-      ]);
+        text(FAMILY_NOTICE),
+      );
+      return;
     }
     // 管理者が登録済みなら、管理者コードは受け付けない（ふつうの未登録者と同じ返事）
   }
 
-  if (looksLikeInviteCode(input)) {
-    // TODO ③：招待コードの照合（入力回数制限・期限・1回限り）と、家族／親の登録
-    return void ctx.line.reply(event.replyToken, [text('招待コードの登録は準備中です。')]);
+  if (looksLikeInviteCode(input)) return redeemInvite(ctx, event, userId, input);
+  await reply(ctx, event, ASK_INVITE_CODE);
+}
+
+/** 招待コードの照合と登録（§9.3〜§9.5） */
+async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: string): Promise<void> {
+  const attempts = await recentInviteAttempts(ctx.db, userId, ctx.now - INVITE_ATTEMPT_WINDOW_MS);
+  if (!canAttemptInvite(attempts, ctx.now)) {
+    await reply(ctx, event, text('入力が続いたため、しばらく受け付けを止めています。1時間ほどしてから、もう一度送ってください。'));
+    return;
+  }
+  await addInviteAttempt(ctx.db, userId, ctx.now);
+
+  const invite = await findInvite(ctx.db, await hashInviteCode(input));
+  const usable = invite !== null && isInviteUsable({ expiresAt: invite.expires_at, usedAt: invite.used_at }, ctx.now);
+  if (!invite || !usable) {
+    await reply(ctx, event, text('招待コードが正しくないか、有効期限が切れています。ご家族に確認してください。'));
+    return;
   }
 
-  return void ctx.line.reply(event.replyToken, [text('招待コードを送ってください。')]);
+  const max = invite.kind === 'parent' ? MAX_PARENTS : MAX_FAMILY;
+  if ((await countUsers(ctx.db, invite.kind)) >= max) {
+    await reply(ctx, event, text('登録できる人数の上限に達しています。管理者のご家族に確認してください。'));
+    return;
+  }
+  if (!(await useInvite(ctx.db, invite.id, ctx.now))) {
+    await reply(ctx, event, text('招待コードが正しくないか、有効期限が切れています。ご家族に確認してください。'));
+    return;
+  }
+
+  if (invite.kind === 'parent') {
+    const name = invite.parent_name ?? 'お母さん';
+    await insertUser(
+      ctx.db,
+      { lineUserId: userId, role: 'parent', displayName: name, sendTime: DEFAULT_SEND_TIME },
+      ctx.now,
+      ctx.today,
+    );
+    await reply(ctx, event, text('登録できました。あしたの朝から、おはようのメッセージをお送りします。'));
+    await notifyFamily(
+      deps(ctx),
+      text(`${name}さんの登録が完了しました。あしたの朝8:00から見守りを始めます。`),
+      'registered',
+    );
+    return;
+  }
+
+  await insertUser(ctx.db, { lineUserId: userId, role: 'family', displayName: null, sendTime: null }, ctx.now, ctx.today);
+  await reply(ctx, event, text('ご家族として登録しました。'), text(FAMILY_NOTICE), usageText(false));
 }
 
 // ---- 親（§5, §6） ----
 
 async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
   // TODO ⑯：unfollow（ブロック・削除）/ follow（解除）で家族へ通知
+  if (event.type === 'postback' && event.postback?.data === POSTBACK_UNWELL_CANCEL) {
+    return cancelUnwell(ctx, event, parent);
+  }
+
   const method = classifyReply(event);
   if (method === null) return; // 画像・動画・位置情報などは記録も返事もしない（§5.1）
 
-  const today = toJst(ctx.now).date;
+  const first = await recordFirstReply(ctx.db, parent.id, ctx.today, ctx.now, method);
 
-  if (method === 'button_unwell') {
-    // TODO ⑥：不調ボタン（家族へ即時通知・30分以内の連打防止・親への返事）
-    await recordFirstReply(ctx.db, parent.id, today, ctx.now, method);
-    return;
-  }
+  if (method === 'button_unwell') return notifyUnwell(ctx, event, parent);
 
-  const first = await recordFirstReply(ctx.db, parent.id, today, ctx.now, method);
   // お礼は「その日最初の返信」が「正午より前」のときだけ（§5.3, §5.4）
-  if (first && isBeforeNoon(ctx.now) && event.replyToken) {
-    if (await ctx.line.reply(event.replyToken, [THANKS])) {
-      await markThanksSent(ctx.db, parent.id, today);
-    }
+  if (first && isBeforeNoon(ctx.now) && (await reply(ctx, event, THANKS))) {
+    await markThanksSent(ctx.db, parent.id, ctx.today);
   }
 }
 
-// ---- 家族（§10） ----
+/** 不調ボタン：家族全員へ即時通知（§6）。時間帯に関係なく有効 */
+async function notifyUnwell(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
+  if (!(await claimUnwellNotice(ctx.db, parent.id, ctx.today, ctx.now, UNWELL_DEBOUNCE_MS))) {
+    await reply(ctx, event, UNWELL_RECENTLY_SENT); // 30分以内の連打
+    return;
+  }
+  const name = parent.display_name ?? 'ご家族';
+  const { success } = await notifyFamily(deps(ctx), familyUnwell(name, formatJstClock(ctx.now)), 'unwell');
+  if (success > 0) {
+    await reply(ctx, event, unwellAckMessage());
+  } else {
+    await resetUnwellNotice(ctx.db, parent.id, ctx.today, ctx.now);
+    await reply(ctx, event, UNWELL_ALL_FAILED);
+  }
+}
 
-async function handleFamily(ctx: Ctx, event: LineEvent, _user: UserRow): Promise<void> {
-  if (!event.replyToken || event.type !== 'message' || event.message?.type !== 'text') return;
-  // TODO ⑨⑫⑭：ようす・おやすみ・さいかい・じかん・しょうたい・デモ用コマンド
-  await ctx.line.reply(event.replyToken, [text('つかいかた：準備中です。')]);
+/** 押し間違いの取り消し（§6.5）：その日の23:59まで */
+async function cancelUnwell(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
+  if (!(await claimUnwellCancel(ctx.db, parent.id, ctx.today, ctx.now))) {
+    await reply(ctx, event, text('取り消せるお知らせはありません。'));
+    return;
+  }
+  const name = parent.display_name ?? 'ご家族';
+  await notifyFamily(deps(ctx), familyUnwellCancelled(name, formatJstClock(ctx.now)), 'unwell_cancel');
+  await reply(ctx, event, UNWELL_CANCELLED);
+}
+
+// ---- 家族（§9.3, §10） ----
+
+async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<void> {
+  const isAdmin = user.is_admin === 1;
+
+  if (event.type === 'postback') {
+    const data = event.postback?.data;
+    if (isAdmin && data === 'action=invite_family') return issueInvite(ctx, event, user, 'family', null);
+    if (isAdmin && data === 'action=invite_parent') {
+      if ((await countUsers(ctx.db, 'parent')) >= MAX_PARENTS) {
+        await reply(ctx, event, text(`親御さんは${MAX_PARENTS}人まで登録できます。すでに上限に達しています。`));
+        return;
+      }
+      await setConversation(ctx.db, user.line_user_id, 'invite_parent_name', null, ctx.now + CONVERSATION_TTL_MS);
+      await reply(ctx, event, text('親御さんの呼び名を送ってください（10文字まで。例：お母さん）'));
+    }
+    return;
+  }
+
+  if (event.type !== 'message' || event.message?.type !== 'text') return;
+  const input = (event.message.text ?? '').trim();
+
+  // 複数手順の操作の途中
+  const conv = await getConversation(ctx.db, user.line_user_id, ctx.now);
+  if (conv?.operation === 'invite_parent_name' && isAdmin) {
+    await clearConversation(ctx.db, user.line_user_id);
+    if (input.length === 0 || [...input].length > PARENT_NAME_MAX || /[\r\n]/.test(input)) {
+      await reply(ctx, event, text('呼び名は10文字までにしてください。もう一度「しょうたい」から始めてください。'));
+      return;
+    }
+    return issueInvite(ctx, event, user, 'parent', input);
+  }
+
+  // 家族が親用の登録リンクを押してしまった場合
+  if (looksLikeInviteCode(input)) {
+    await reply(ctx, event, text('すでにご家族として登録されています。このリンクはご両親のスマートフォンで開いてください。'));
+    return;
+  }
+
+  switch (input) {
+    case 'しょうたい':
+      if (isAdmin) return void (await reply(ctx, event, inviteChoice()));
+      break;
+    // TODO ⑨⑫⑭：ようす・おやすみ・さいかい・じかん・なまえ・デモ用コマンド
+  }
+  await reply(ctx, event, usageText(isAdmin));
+}
+
+/** 招待コードを発行する（§9.3）。親の場合は、押して送信するだけの登録用リンクも付ける（§9.5） */
+async function issueInvite(
+  ctx: Ctx,
+  event: LineEvent,
+  admin: UserRow,
+  kind: 'family' | 'parent',
+  parentName: string | null,
+): Promise<void> {
+  const max = kind === 'parent' ? MAX_PARENTS : MAX_FAMILY;
+  if ((await countUsers(ctx.db, kind)) >= max) {
+    await reply(ctx, event, text(`登録できる人数の上限（${max}人）に達しています。`));
+    return;
+  }
+  const code = generateInviteCode();
+  await createInvite(
+    ctx.db,
+    { kind, codeHash: await hashInviteCode(code), parentName, expiresAt: ctx.now + INVITE_TTL_MS, issuedBy: admin.id },
+    ctx.now,
+  );
+
+  const oaId = ctx.env.LINE_OA_ID;
+  if (kind === 'parent') {
+    const link = oaId ? `https://line.me/R/oaMessage/${encodeURIComponent(oaId)}/?${code}` : null;
+    await reply(
+      ctx,
+      event,
+      text(`${parentName}さんの招待コード：${code}\n（24時間有効・1回だけ使えます）`),
+      text(
+        link
+          ? `次のリンクを${parentName}さんのLINEに送ってください。押して「送信」を押すだけで登録できます。\n${link}`
+          : `${parentName}さんのLINEで、このアカウントを友だち追加し、上のコードを送ってもらってください。`,
+      ),
+    );
+    return;
+  }
+  const addLink = oaId ? `\n友だち追加：https://line.me/R/ti/p/${encodeURIComponent(oaId)}` : '';
+  await reply(
+    ctx,
+    event,
+    text(`ご家族の招待コード：${code}\n（24時間有効・1回だけ使えます）`),
+    text(`追加するご家族に、このアカウントを友だち追加して、コードを送ってもらってください。${addLink}`),
+  );
 }

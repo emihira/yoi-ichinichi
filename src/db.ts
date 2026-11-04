@@ -230,3 +230,153 @@ export async function logFailure(
     .bind(kind, targetUser, now, error ?? null)
     .run();
 }
+
+// ---- 登録（§9） ----
+
+export async function countUsers(db: D1Database, role: 'parent' | 'family'): Promise<number> {
+  const r = await db
+    .prepare(`SELECT COUNT(*) AS n FROM users WHERE role = ? AND status != 'removed'`)
+    .bind(role)
+    .first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+export async function insertUser(
+  db: D1Database,
+  u: { lineUserId: string; role: 'parent' | 'family'; displayName: string | null; sendTime: string | null },
+  now: number,
+  today: string,
+): Promise<number> {
+  const r = await db
+    .prepare(
+      `INSERT INTO users (line_user_id, role, is_admin, display_name, send_time, status, created_at, registered_date)
+       VALUES (?, ?, 0, ?, ?, 'active', ?, ?)`,
+    )
+    .bind(u.lineUserId, u.role, u.displayName, u.sendTime, now, today)
+    .run();
+  return Number(r.meta.last_row_id);
+}
+
+export interface InviteRow {
+  id: number;
+  kind: 'family' | 'parent';
+  parent_name: string | null;
+  expires_at: number;
+  used_at: number | null;
+}
+
+export async function createInvite(
+  db: D1Database,
+  inv: { kind: 'family' | 'parent'; codeHash: string; parentName: string | null; expiresAt: number; issuedBy: number },
+  now: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO invites (kind, code_hash, parent_name, expires_at, issued_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(inv.kind, inv.codeHash, inv.parentName, inv.expiresAt, inv.issuedBy, now)
+    .run();
+}
+
+export async function findInvite(db: D1Database, codeHash: string): Promise<InviteRow | null> {
+  return db
+    .prepare(`SELECT id, kind, parent_name, expires_at, used_at FROM invites WHERE code_hash = ?`)
+    .bind(codeHash)
+    .first<InviteRow>();
+}
+
+/** 招待コードを「使用済み」にする。まだ使われていなかったときだけ true（同時に2人が使えないように） */
+export async function useInvite(db: D1Database, inviteId: number, now: number): Promise<boolean> {
+  const r = await db
+    .prepare(`UPDATE invites SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?`)
+    .bind(now, inviteId, now)
+    .run();
+  return r.meta.changes === 1;
+}
+
+export async function recentInviteAttempts(db: D1Database, lineUserId: string, since: number): Promise<number[]> {
+  const r = await db
+    .prepare(`SELECT attempted_at FROM invite_attempts WHERE line_user_id = ? AND attempted_at > ?`)
+    .bind(lineUserId, since)
+    .all<{ attempted_at: number }>();
+  return r.results.map((x) => x.attempted_at);
+}
+
+export async function addInviteAttempt(db: D1Database, lineUserId: string, now: number): Promise<void> {
+  await db.prepare(`INSERT INTO invite_attempts (line_user_id, attempted_at) VALUES (?, ?)`).bind(lineUserId, now).run();
+}
+
+// ---- 複数手順の操作の途中状態（§10.1：10分で無効） ----
+
+export interface ConversationState {
+  operation: string;
+  parent_id: number | null;
+}
+
+export async function getConversation(db: D1Database, lineUserId: string, now: number): Promise<ConversationState | null> {
+  return db
+    .prepare(`SELECT operation, parent_id FROM conversation_state WHERE line_user_id = ? AND expires_at > ?`)
+    .bind(lineUserId, now)
+    .first<ConversationState>();
+}
+
+export async function setConversation(
+  db: D1Database,
+  lineUserId: string,
+  operation: string,
+  parentId: number | null,
+  expiresAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO conversation_state (line_user_id, operation, parent_id, expires_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(line_user_id) DO UPDATE SET operation = excluded.operation, parent_id = excluded.parent_id, expires_at = excluded.expires_at`,
+    )
+    .bind(lineUserId, operation, parentId, expiresAt)
+    .run();
+}
+
+export async function clearConversation(db: D1Database, lineUserId: string): Promise<void> {
+  await db.prepare(`DELETE FROM conversation_state WHERE line_user_id = ?`).bind(lineUserId).run();
+}
+
+// ---- 不調ボタン（§6） ----
+
+/** 不調通知の担当を取る：前回の通知から30分以上たっていれば日時を書き込み true */
+export async function claimUnwellNotice(
+  db: D1Database,
+  parentId: number,
+  date: string,
+  now: number,
+  debounceMs: number,
+): Promise<boolean> {
+  const r = await db
+    .prepare(
+      `UPDATE daily_status SET unwell_notified_at = ?
+       WHERE parent_id = ? AND date = ? AND (unwell_notified_at IS NULL OR unwell_notified_at <= ?)`,
+    )
+    .bind(now, parentId, date, now - debounceMs)
+    .run();
+  return r.meta.changes === 1;
+}
+
+/** 押し間違いの取り消しを記録する。まだ取り消していなかったときだけ true */
+export async function claimUnwellCancel(db: D1Database, parentId: number, date: string, now: number): Promise<boolean> {
+  const r = await db
+    .prepare(
+      `UPDATE daily_status SET unwell_cancelled_at = ?
+       WHERE parent_id = ? AND date = ? AND unwell_notified_at IS NOT NULL
+         AND (unwell_cancelled_at IS NULL OR unwell_cancelled_at < unwell_notified_at)`,
+    )
+    .bind(now, parentId, date)
+    .run();
+  return r.meta.changes === 1;
+}
+
+/** 家族の全員に送れなかったときは、不調通知の記録を戻す（次に押されたとき、もう一度送れるように） */
+export async function resetUnwellNotice(db: D1Database, parentId: number, date: string, at: number): Promise<void> {
+  await db
+    .prepare(`UPDATE daily_status SET unwell_notified_at = NULL WHERE parent_id = ? AND date = ? AND unwell_notified_at = ?`)
+    .bind(parentId, date, at)
+    .run();
+}
