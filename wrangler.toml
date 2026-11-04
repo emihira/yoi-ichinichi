@@ -12,7 +12,7 @@ crons = [
 [[d1_databases]]
 binding = "DB"
 database_name = "yoi-ichinichi"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "909a6e01-9e24-4bcf-8c8d-1f67a7994181"
 migrations_dir = "migrations"
 
 [vars]
