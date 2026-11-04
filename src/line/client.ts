@@ -33,6 +33,10 @@ export function createLineClient(accessToken: string, fetchImpl: typeof fetch = 
         headers,
         body: JSON.stringify({ replyToken, messages }),
       });
+      if (!res.ok) {
+        // 返信の失敗理由を記録する（本文は LINE からのエラー説明だけで、利用者のメッセージは含まない）
+        console.error('LINE への応答メッセージに失敗', res.status, (await res.text()).slice(0, 300));
+      }
       return res.ok;
     },
 
