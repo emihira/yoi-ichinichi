@@ -4,6 +4,11 @@
 import { POSTBACK_OK, POSTBACK_UNWELL, POSTBACK_UNWELL_CANCEL } from '../rules';
 import type { LineMessage } from './client';
 
+/** 呼び名に敬称を付ける。すでに「さん」「様」「ちゃん」などで終わっていれば、そのまま */
+export function honorific(name: string): string {
+  return /(さん|様|さま|ちゃん|くん)$/.test(name) ? name : `${name}さん`;
+}
+
 export function text(t: string): LineMessage {
   return { type: 'text', text: t };
 }
@@ -97,19 +102,19 @@ export const UNWELL_RECENTLY_SENT = text(
 // ---- 家族への通知 ----
 
 export function familyNoReply(name: string): LineMessage {
-  return text(`${name}さんから、けさのお返事がまだありません。お電話で確認してみてください。`);
+  return text(`${honorific(name)}から、けさのお返事がまだありません。お電話で確認してみてください。`);
 }
 
 export function familyMorningFailed(name: string): LineMessage {
-  return text(`${name}さんへの、けさのメッセージを送れませんでした。お電話で確認してみてください。`);
+  return text(`${honorific(name)}への、けさのメッセージを送れませんでした。お電話で確認してみてください。`);
 }
 
 export function familyUnwell(name: string, clock: string): LineMessage {
-  return text(`${name}さんが『ぐあいがわるい』を押しました（${clock}）。お電話で様子を確かめてください。`);
+  return text(`${honorific(name)}が『ぐあいがわるい』を押しました（${clock}）。お電話で様子を確かめてください。`);
 }
 
 export function familyUnwellCancelled(name: string, clock: string): LineMessage {
-  return text(`${name}さんの『ぐあいがわるい』は押しまちがいでした（${clock}に取り消し）。`);
+  return text(`${honorific(name)}の『ぐあいがわるい』は押しまちがいでした（${clock}に取り消し）。`);
 }
 
 export const UNWELL_CANCELLED = text('取り消しました。今日も良い一日となりますように');

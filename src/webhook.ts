@@ -34,6 +34,7 @@ import {
 import { createLineClient, type LineClient } from './line/client';
 import {
   ASK_INVITE_CODE,
+  honorific,
   familyUnwell,
   familyUnwellCancelled,
   FAMILY_NOTICE,
@@ -184,7 +185,7 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: s
     await reply(ctx, event, text('登録できました。あしたの朝から、おはようのメッセージをお送りします。'));
     await notifyFamily(
       deps(ctx),
-      text(`${name}さんの登録が完了しました。あしたの朝8:00から見守りを始めます。`),
+      text(`${honorific(name)}の登録が完了しました。あしたの朝8:00から見守りを始めます。`),
       'registered',
     );
     return;
@@ -322,11 +323,11 @@ async function issueInvite(
     await reply(
       ctx,
       event,
-      text(`${parentName}さんの招待コード：${code}\n（24時間有効・1回だけ使えます）`),
+      text(`${honorific(parentName ?? '')}の招待コード：${code}\n（24時間有効・1回だけ使えます）`),
       text(
         link
-          ? `次のリンクを${parentName}さんのLINEに送ってください。押して「送信」を押すだけで登録できます。\n${link}`
-          : `${parentName}さんのLINEで、このアカウントを友だち追加し、上のコードを送ってもらってください。`,
+          ? `次のリンクを${honorific(parentName ?? '')}のLINEに送ってください。押して「送信」を押すだけで登録できます。\n${link}`
+          : `${honorific(parentName ?? '')}のLINEで、このアカウントを友だち追加し、上のコードを送ってもらってください。`,
       ),
     );
     return;
