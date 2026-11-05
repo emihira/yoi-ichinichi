@@ -34,6 +34,21 @@ describe('予備挨拶文（§3.3）', () => {
       expect(greetingProblem(g), `${key}: ${g}`).toBeNull();
     }
   });
+  it('366日分（2月29日を含む）がそろっていて、同じ文がない', () => {
+    const all = fallbackGreetings as Record<string, string>;
+    const keys = Object.keys(all);
+    expect(keys.length).toBe(366);
+    expect(keys).toContain('02-29');
+    for (let d = new Date(Date.UTC(2028, 0, 1)); d.getUTCFullYear() === 2028; d.setUTCDate(d.getUTCDate() + 1)) {
+      expect(all[d.toISOString().slice(5, 10)]).toBeDefined();
+    }
+    expect(new Set(Object.values(all)).size).toBe(366);
+  });
+  it('毎年日付が変わる行事（節気など）で「今日は」と言い切らない', () => {
+    for (const [key, g] of Object.entries(fallbackGreetings as Record<string, string>)) {
+      expect(/今日は.*(立春|立夏|立秋|立冬|春分|秋分|夏至|冬至|大寒|小寒|節分|土用)/.test(g), `${key}: ${g}`).toBe(false);
+    }
+  });
   it('その日の予備挨拶文がなければ、月ごとの挨拶文を使う', () => {
     expect(fallbackGreeting('2026-11-05')).toBe((fallbackGreetings as Record<string, string>)['11-05']);
     expect(isValidGreeting(fallbackGreeting('2027-03-20'))).toBe(true);
