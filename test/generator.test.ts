@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractGreeting, japaneseDate, SYSTEM_PROMPT, userPrompt } from '../greeting-generator/src/prompt';
+import { extractGreeting, generatedProblem, japaneseDate, solarTermNote, SYSTEM_PROMPT, userPrompt } from '../greeting-generator/src/prompt';
 
 describe('挨拶文の生成（§3.2）', () => {
   it('日付を日本語にする', () => {
@@ -20,5 +20,18 @@ describe('挨拶文の生成（§3.2）', () => {
   it('応答の前後の空白やかぎかっこを取る', () => {
     expect(extractGreeting('  「おはよう。菊の花がきれいな季節ですね。」\n')).toBe('おはよう。菊の花がきれいな季節ですね。');
     expect(extractGreeting('おはよう。立冬のころですね。')).toBe('おはよう。立冬のころですね。');
+  });
+  it('節気の前後を正しく伝える（11/5 は立冬の前）', () => {
+    expect(solarTermNote('2026-11-05')).toContain('まだ立冬にはなっていない');
+    expect(solarTermNote('2026-11-07')).toContain('今は立冬（11月7日ごろ）のころ');
+    expect(solarTermNote('2026-11-06')).toContain('もうすぐ立冬');
+    expect(solarTermNote('2026-12-30')).toContain('冬至（12月22日ごろ）を過ぎて');
+    expect(solarTermNote('2027-01-02')).toContain('次の小寒');
+    expect(userPrompt('2026-11-05', [])).toContain('二十四節気：');
+  });
+  it('生成した挨拶文は、一文だけで、お願いや勧めをしない', () => {
+    expect(generatedProblem('おはよう。菊の花がきれいな季節ですね。')).toBeNull();
+    expect(generatedProblem('おはよう。朝晩の冷えが深まるころですね。あたたかくしてお過ごしくださいね。')).not.toBeNull();
+    expect(generatedProblem('おはよう。温かいお茶を飲みましょうね。')).not.toBeNull();
   });
 });

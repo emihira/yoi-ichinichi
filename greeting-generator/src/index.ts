@@ -5,7 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { greetingProblem } from '../../src/greeting';
 import { addDays, toJst } from '../../src/time';
-import { extractGreeting, SYSTEM_PROMPT, userPrompt } from './prompt';
+import { extractGreeting, generatedProblem, SYSTEM_PROMPT, userPrompt } from './prompt';
 
 interface Env {
   GREETINGS: KVNamespace;
@@ -82,7 +82,7 @@ async function generateOnce(client: Anthropic, date: string, recent: string[]): 
     }
     const text = res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
     const greeting = extractGreeting(text);
-    const problem = greetingProblem(greeting);
+    const problem = greetingProblem(greeting) ?? generatedProblem(greeting);
     if (problem) {
       console.error('文面チェックで不合格', date, problem, greeting);
       return null;

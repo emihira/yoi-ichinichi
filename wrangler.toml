@@ -17,5 +17,5 @@ migrations_dir = "migrations"
 
 [vars]
 LINE_OA_ID = "@696kjrde"          # LINE公式アカウントのベーシックID（例：@123abcde）
-GREETING_API_URL = ""    # 共通挨拶文の配信先。空なら予備挨拶文を使う
+GREETING_API_URL = "https://yoi-ichinichi-greeting.yoi-ichinichi.workers.dev"    # 共通挨拶文の配信先。空なら予備挨拶文を使う
 DEMO_MODE = "false"
