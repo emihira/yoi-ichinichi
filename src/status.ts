@@ -31,6 +31,7 @@ const METHOD_LABEL: Record<ReplyMethod, string> = {
   button_unwell: 'ぐあいがわるい',
   text: '文字',
   sticker: 'スタンプ',
+  image: '写真',
 };
 
 /** 1日分の記号：○＝返信あり、×＝返信なし、休＝休止中、－＝判定前・登録前 */

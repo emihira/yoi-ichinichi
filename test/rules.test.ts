@@ -123,8 +123,11 @@ describe('返信の種類（§5.1）', () => {
     expect(classifyReply({ type: 'postback', postback: { data: 'action=ok' } })).toBe('button_ok');
     expect(classifyReply({ type: 'postback', postback: { data: 'action=unwell' } })).toBe('button_unwell');
   });
-  it('画像・動画・ファイル・位置情報は無効', () => {
-    for (const type of ['image', 'video', 'file', 'location']) {
+  it('写真も有効（11/5 の仕様変更）', () => {
+    expect(classifyReply({ type: 'message', message: { type: 'image' } })).toBe('image');
+  });
+  it('動画・ファイル・位置情報は無効', () => {
+    for (const type of ['video', 'file', 'location']) {
       expect(classifyReply({ type: 'message', message: { type } })).toBeNull();
     }
   });

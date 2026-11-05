@@ -230,7 +230,7 @@ async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promis
 
   const method = classifyReply(event);
   if (method !== null) {
-    // 画像・動画・位置情報などは「返事」には数えず、お礼も返さない（§5.1）
+    // 動画・位置情報・ファイルなどは「返事」には数えず、お礼も返さない（§5.1。写真は 11/5 から数える）
     const first = await recordFirstReply(ctx.db, parent.id, ctx.today, ctx.now, method);
     if (method === 'button_unwell') return notifyUnwell(ctx, event, parent);
     // お礼は「その日最初の返信」が「正午より前」のときだけ（§5.3, §5.4）

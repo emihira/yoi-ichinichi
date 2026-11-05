@@ -111,7 +111,7 @@ export function isBeforeNoon(now: number): boolean {
 
 // ---- 返信の種類（§5.1） ----
 
-export type ReplyMethod = 'voice' | 'button_ok' | 'button_unwell' | 'text' | 'sticker';
+export type ReplyMethod = 'voice' | 'button_ok' | 'button_unwell' | 'text' | 'sticker' | 'image';
 
 export const POSTBACK_OK = 'action=ok';
 export const POSTBACK_UNWELL = 'action=unwell';
@@ -123,7 +123,7 @@ export type ReplyEventLike =
   | { type: 'postback'; postback: { data: string } }
   | { type: string };
 
-/** 有効な返信なら記録する返信方法を返す。無効（画像・動画・位置情報など）なら null */
+/** 有効な返信なら記録する返信方法を返す。無効（動画・位置情報・ファイルなど）なら null */
 export function classifyReply(event: ReplyEventLike): ReplyMethod | null {
   if (event.type === 'message' && 'message' in event) {
     switch (event.message.type) {
@@ -133,6 +133,8 @@ export function classifyReply(event: ReplyEventLike): ReplyMethod | null {
         return 'text';
       case 'sticker':
         return 'sticker';
+      case 'image':
+        return 'image'; // 写真もお返事に数える（11/5 の仕様変更）
       default:
         return null;
     }
