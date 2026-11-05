@@ -61,7 +61,8 @@ import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, registrationDate, 
 import { describeInput, INPUT_NOTICE_INTERVAL_MS, INPUT_RETENTION_DAYS, INPUT_SHOW_MAX, inputLabel, isInputNoticeTarget, type InputKind } from './input';
 import { formatParentStatus, STATUS_LEGEND } from './status';
 import { addDays, DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
-import { notifyFamily, remindersSuspended, runDemo, type DemoCommand, type Deps } from './watch';
+import { REMINDER_STOP_THRESHOLD } from './quota';
+import { monthlyUsage, notifyFamily, remindersSuspended, runDemo, syncLineUsage, type DemoCommand, type Deps } from './watch';
 
 export const MAX_PARENTS = 2;
 export const MAX_FAMILY = 3;
@@ -384,6 +385,11 @@ async function statusText(ctx: Ctx, isAdmin: boolean): Promise<string> {
   if (isAdmin) {
     const failures = await countFailuresSince(ctx.db, ctx.now - 7 * 24 * 60 * MINUTE_MS);
     if (failures > 0) out += `\n\n送信できなかったお知らせがあります（この7日間で${failures}件）`;
+    // 今月の送信数（§11.2）。その場で LINE の値も取り直す（取得の API は送信数に数えない）
+    await syncLineUsage(deps(ctx));
+    const u = await monthlyUsage(deps(ctx));
+    const lineNote = u.line === null ? 'LINE の記録は取得できませんでした' : `LINE の記録 ${u.line}通${u.quota === null ? '' : `／上限 ${u.quota}通`}`;
+    out += `\n\n今月の送信数：${u.own}通（${lineNote}）\n${REMINDER_STOP_THRESHOLD}通を超えると、リマインドと「入力がありました」を止めます。`;
   }
   return out;
 }

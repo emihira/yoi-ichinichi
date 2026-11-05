@@ -467,7 +467,52 @@ export async function listRecentInputs(db: D1Database, parentId: number, since: 
   return r.results;
 }
 
-export async function deleteInputsBefore(db: D1Database, before: number): Promise<number> {
-  const r = await db.prepare(`DELETE FROM inputs WHERE received_at < ?`).bind(before).run();
+// ---- 送信数の照合と日次メンテナンス（§11, §13.3） ----
+
+export async function getSetting(db: D1Database, key: string): Promise<string | null> {
+  const r = await db.prepare(`SELECT value FROM settings WHERE key = ?`).bind(key).first<{ value: string }>();
+  return r ? r.value : null;
+}
+
+export async function setSetting(db: D1Database, key: string, value: string): Promise<void> {
+  await db
+    .prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+    .bind(key, value)
+    .run();
+}
+
+/** まだ無ければ書き込み、書き込めたら true（1回だけ行う処理の権利を取る） */
+export async function claimSetting(db: D1Database, key: string, value: string): Promise<boolean> {
+  const r = await db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING`).bind(key, value).run();
+  return r.meta.changes === 1;
+}
+
+/** 保存期間を過ぎたデータを消す。表ごとに消した件数を返す */
+export async function deleteExpired(
+  db: D1Database,
+  c: import('./quota').RetentionCutoffs,
+): Promise<Record<string, number>> {
+  const statements: [string, D1PreparedStatement][] = [
+    ['daily_status', db.prepare(`DELETE FROM daily_status WHERE date < ?`).bind(c.dailyStatusBeforeDate)],
+    ['send_log', db.prepare(`DELETE FROM send_log WHERE sent_at < ?`).bind(c.sendLogBefore)],
+    ['notification_failures', db.prepare(`DELETE FROM notification_failures WHERE failed_at < ?`).bind(c.failuresBefore)],
+    ['processed_events', db.prepare(`DELETE FROM processed_events WHERE processed_at < ?`).bind(c.weekBefore)],
+    ['inputs', db.prepare(`DELETE FROM inputs WHERE received_at < ?`).bind(c.weekBefore)],
+    ['invite_attempts', db.prepare(`DELETE FROM invite_attempts WHERE attempted_at < ?`).bind(c.weekBefore)],
+    [
+      'invites',
+      db.prepare(`DELETE FROM invites WHERE expires_at < ? OR (used_at IS NOT NULL AND used_at < ?)`).bind(c.invitesBefore, c.invitesBefore),
+    ],
+    ['conversation_state', db.prepare(`DELETE FROM conversation_state WHERE expires_at < ?`).bind(c.conversationBefore)],
+  ];
+  const results = await db.batch(statements.map(([, s]) => s));
+  return Object.fromEntries(statements.map(([name], i) => [name, results[i]?.meta.changes ?? 0]));
+}
+
+/** 翌日から適用する送信時刻を、今日の送信時刻に切り替える（§10「じかん」） */
+export async function applyNextSendTimes(db: D1Database): Promise<number> {
+  const r = await db
+    .prepare(`UPDATE users SET send_time = send_time_next, send_time_next = NULL WHERE send_time_next IS NOT NULL`)
+    .run();
   return r.meta.changes;
 }

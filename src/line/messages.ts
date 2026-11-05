@@ -119,6 +119,11 @@ export function familyUnwellCancelled(name: string, clock: string): LineMessage 
 
 export const UNWELL_CANCELLED = text('取り消しました。今日も良い一日となりますように');
 
+/** 今月の送信数が150通を超えたとき、家族全員に1回（§11.4。「入力がありました」も止める：11/5 の仕様変更） */
+export const REMINDER_STOPPED = text(
+  '今月のLINE送信数が150通を超えたため、朝のリマインドと「入力がありました」のお知らせを一時停止しました。朝の挨拶と未返信・不調のお知らせは継続します。来月1日から自動で再開します。',
+);
+
 /** 親から入力があったとき（11/5 の仕様変更）。本文は入れず、内容は「ようす」で確かめてもらう */
 export function familyInput(name: string, clock: string, label: string): LineMessage {
   return text(`${honorific(name)}から入力がありました（${clock}・${label}）。\n内容は「ようす」と送ると確かめられます。`);

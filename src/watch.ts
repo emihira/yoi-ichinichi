@@ -3,28 +3,32 @@
 
 import {
   addPushCount,
+  applyNextSendTimes,
   cacheGreeting,
   claim,
+  claimSetting,
+  deleteExpired,
   getCachedGreeting,
   getDay,
   getPushCount,
+  getSetting,
   listFamily,
   listParents,
   logFailure,
   logSend,
   markMorningFailed,
   markNoonNotified,
+  setSetting,
   toParentInfo,
   type UserRow,
 } from './db';
 import type { Env } from './env';
 import { fallbackGreeting, fetchGreetingFromApi } from './greeting';
 import { createLineClient, type LineClient, type LineMessage } from './line/client';
-import { familyMorningFailed, familyNoReply, morningMessage } from './line/messages';
+import { familyMorningFailed, familyNoReply, morningMessage, REMINDER_STOPPED } from './line/messages';
+import { effectivePushCount, isOverStopThreshold, retentionCutoffs } from './quota';
 import { noonOutcome, shouldRunNoonCheck, shouldSendMorning, shouldSendReminder } from './rules';
 import { toJst } from './time';
-
-export const REMINDER_STOP_THRESHOLD = 150;
 
 export interface Deps {
   db: D1Database;
@@ -50,6 +54,51 @@ export async function runWatch(deps: Deps): Promise<void> {
     } catch (e) {
       // 1人の失敗で、もう1人の見守りを止めない
       console.error('見守り処理でエラー', parent.id, e);
+    }
+  }
+  await noticeReminderStop(deps);
+}
+
+/** 今月リマインドを止めたことを、家族全員に1回だけ知らせる（§11.4）。翌月は月が変わるので自動で再開 */
+async function noticeReminderStop(deps: Deps): Promise<void> {
+  if (!(await remindersSuspended(deps))) return;
+  const month = toJst(deps.now).date.slice(0, 7);
+  if (!(await claimSetting(deps.db, `reminder_stop_notified:${month}`, String(deps.now)))) return;
+  await notifyFamily(deps, REMINDER_STOPPED, 'reminder_suspended');
+}
+
+/** 今月の送信数：自分で数えた値・LINE から取得した値（毎日4:00と「ようす」のときに更新）・判定に使う値 */
+export async function monthlyUsage(deps: Deps): Promise<{ own: number; line: number | null; quota: number | null; effective: number }> {
+  const month = toJst(deps.now).date.slice(0, 7);
+  const own = await getPushCount(deps.db, month);
+  const lineRaw = await getSetting(deps.db, `line_usage:${month}`);
+  const quotaRaw = await getSetting(deps.db, `line_quota:${month}`);
+  const line = lineRaw === null ? null : Number(lineRaw);
+  const quota = quotaRaw === null ? null : Number(quotaRaw);
+  return { own, line, quota, effective: effectivePushCount(own, line) };
+}
+
+/** LINE から今月の上限・消費数を取得して保存する（§11.2） */
+export async function syncLineUsage(deps: Deps): Promise<void> {
+  const month = toJst(deps.now).date.slice(0, 7);
+  const { quota, used } = await deps.line.getUsage();
+  if (used !== null) await setSetting(deps.db, `line_usage:${month}`, String(used));
+  if (quota !== null) await setSetting(deps.db, `line_quota:${month}`, String(quota));
+}
+
+/** 毎日4:00の日次メンテナンス（§4, §11, §13.3） */
+export async function runMaintenance(deps: Deps): Promise<void> {
+  const steps: [string, () => Promise<unknown>][] = [
+    ['送信数の照合', () => syncLineUsage(deps)],
+    ['古いデータの削除', () => deleteExpired(deps.db, retentionCutoffs(deps.now, toJst(deps.now).date))],
+    ['送信時刻の切り替え', () => applyNextSendTimes(deps.db)],
+  ];
+  for (const [name, step] of steps) {
+    try {
+      console.log('日次メンテナンス', name, JSON.stringify(await step()) ?? '');
+    } catch (e) {
+      // 1つの失敗で、ほかの処理を止めない
+      console.error('日次メンテナンスでエラー', name, e);
     }
   }
 }
@@ -124,7 +173,7 @@ export async function notifyFamily(deps: Deps, msg: LineMessage, kind: string): 
 
 /** 今月の送信数が上限の目安を超えたか。超えたらリマインドと「入力がありました」を止め、朝のメッセージと大事な通知に枠を残す */
 export async function remindersSuspended(deps: Deps): Promise<boolean> {
-  return (await getPushCount(deps.db, toJst(deps.now).date.slice(0, 7))) > REMINDER_STOP_THRESHOLD;
+  return isOverStopThreshold((await monthlyUsage(deps)).effective);
 }
 
 // ---- デモモード（§16.2）：DEMO_MODE=true のときだけ、管理者が使える ----

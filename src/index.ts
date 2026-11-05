@@ -2,11 +2,9 @@
 // - fetch：LINE からの Webhook を受け取る
 // - scheduled：Cron Triggers（5分ごとの見守り処理と、毎日4:00の日次メンテナンス）
 
-import { deleteInputsBefore } from './db';
 import type { Env } from './env';
-import { INPUT_RETENTION_DAYS } from './input';
 import { verifySignature } from './line/signature';
-import { runWatch, depsFromEnv } from './watch';
+import { runMaintenance, runWatch, depsFromEnv } from './watch';
 import { handleEvents, type LineEvent } from './webhook';
 
 const CRON_WATCH = '*/5 20-23,0-3 * * *';
@@ -40,9 +38,8 @@ export default {
     if (event.cron === CRON_WATCH) {
       ctx.waitUntil(runWatch(depsFromEnv(env)));
     } else if (event.cron === CRON_MAINTENANCE) {
-      // 親からの入力の記録は7日間だけ残す（11/5 の仕様変更）
-      ctx.waitUntil(deleteInputsBefore(env.DB, Date.now() - INPUT_RETENTION_DAYS * 24 * 60 * 60_000).then(() => undefined));
-      // TODO ⑪：送信数の照合（LINEの送信数確認API）・ほかの古いデータの削除・送信時刻の切り替え
+      // 送信数の照合・古いデータの削除・送信時刻の切り替え（§11, §13.3）
+      ctx.waitUntil(runMaintenance(depsFromEnv(env)));
     }
   },
 } satisfies ExportedHandler<Env>;

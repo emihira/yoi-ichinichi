@@ -3,6 +3,8 @@
 // - プッシュメッセージ（push）：送信先の人数×回数で数える
 // - 重要な通知は1回だけ再試行。同じ再試行キー（X-Line-Retry-Key）で二重配信を防ぐ
 
+import { parseConsumption, parseQuota } from '../quota';
+
 const API = 'https://api.line.me/v2/bot';
 
 export type LineMessage = Record<string, unknown>;
@@ -18,6 +20,8 @@ export interface PushResult {
 export interface LineClient {
   reply(replyToken: string, messages: LineMessage[]): Promise<boolean>;
   push(to: string, messages: LineMessage[], retryKey: string): Promise<PushResult>;
+  /** 今月の上限と消費数（§11.2）。取得できなかった値は null */
+  getUsage(): Promise<{ quota: number | null; used: number | null }>;
 }
 
 export function createLineClient(accessToken: string, fetchImpl: typeof fetch = fetch): LineClient {
@@ -63,6 +67,24 @@ export function createLineClient(accessToken: string, fetchImpl: typeof fetch = 
       // 400番台（宛先の間違いなど）は再試行しても直らないが、通信エラーと5xx・429は1回だけやり直す
       if (first.status >= 400 && first.status < 500 && first.status !== 429) return first;
       return send();
+    },
+
+    async getUsage() {
+      const get = async (path: string): Promise<unknown> => {
+        try {
+          const res = await fetchImpl(`${API}${path}`, { headers: { Authorization: headers.Authorization } });
+          if (!res.ok) {
+            console.error('LINE の送信数の取得に失敗', path, res.status);
+            return null;
+          }
+          return await res.json();
+        } catch (e) {
+          console.error('LINE の送信数の取得に失敗', path, String(e));
+          return null;
+        }
+      };
+      const [quota, used] = await Promise.all([get('/message/quota'), get('/message/quota/consumption')]);
+      return { quota: parseQuota(quota), used: parseConsumption(used) };
     },
   };
 }
