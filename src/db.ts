@@ -516,3 +516,23 @@ export async function applyNextSendTimes(db: D1Database): Promise<number> {
     .run();
   return r.meta.changes;
 }
+
+// ---- 家族の操作（§10.3, §10.4） ----
+
+/** 登録中の親を1人読む（ボタンの中の親IDは書き換えられうるので、必ず親であることを確かめる） */
+export async function getParentById(db: D1Database, id: number): Promise<UserRow | null> {
+  return db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'parent' AND status != 'removed'`).bind(id).first<UserRow>();
+}
+
+/** 休止の最終日を設定する（この日まで休止。翌朝から再開） */
+export async function setPauseUntil(db: D1Database, parentId: number, until: string): Promise<void> {
+  await db.prepare(`UPDATE users SET pause_until = ? WHERE id = ? AND role = 'parent'`).bind(until, parentId).run();
+}
+
+/** 送信時刻を変える。today=true なら今日から、false なら翌日から（4:00 の日次処理で切り替え） */
+export async function setSendTime(db: D1Database, parentId: number, hhmm: string, today: boolean): Promise<void> {
+  const sql = today
+    ? `UPDATE users SET send_time = ?, send_time_next = NULL WHERE id = ? AND role = 'parent'`
+    : `UPDATE users SET send_time_next = ? WHERE id = ? AND role = 'parent'`;
+  await db.prepare(sql).bind(hhmm, parentId).run();
+}

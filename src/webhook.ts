@@ -11,7 +11,9 @@ import {
   createInvite,
   findInvite,
   getConversation,
+  getDay,
   getDaysRange,
+  getParentById,
   getUserByLineId,
   insertInput,
   insertUser,
@@ -24,11 +26,28 @@ import {
   registerAdmin,
   resetUnwellNotice,
   setConversation,
+  setPauseUntil,
+  setSendTime,
   toParentInfo,
   useInvite,
   type UserRow,
 } from './db';
 import type { Env } from './env';
+import {
+  ACTION_EXPIRED,
+  chooseHourMessage,
+  chooseMinuteMessage,
+  chooseParentMessage,
+  decodeAction,
+  isValidPauseUntil,
+  pauseDateMessage,
+  pauseDoneText,
+  resumeOutcome,
+  resumeText,
+  sendTimeApply,
+  sendTimeDoneText,
+  type FamilyAction,
+} from './family';
 import {
   canAttemptInvite,
   extractInviteCodes,
@@ -57,7 +76,7 @@ import {
   unwellAckMessage,
   usageText,
 } from './line/messages';
-import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
+import { classifyReply, isBeforeNoon, isWatchedToday, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
 import { describeInput, INPUT_NOTICE_INTERVAL_MS, INPUT_RETENTION_DAYS, INPUT_SHOW_MAX, inputLabel, isInputNoticeTarget, type InputKind } from './input';
 import { formatParentStatus, STATUS_LEGEND } from './status';
 import { addDays, DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
@@ -84,7 +103,7 @@ export interface LineEvent {
   replyToken?: string;
   source?: { type: string; userId?: string };
   message?: { type: string; text?: string; duration?: number };
-  postback?: { data: string };
+  postback?: { data: string; params?: { date?: string } };
 }
 
 interface Ctx {
@@ -285,7 +304,10 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   const isAdmin = user.is_admin === 1;
 
   if (event.type === 'postback') {
-    const data = event.postback?.data;
+    const data = event.postback?.data ?? '';
+    const action = decodeAction(data, ctx.now);
+    if (action === 'expired') return void (await reply(ctx, event, text(ACTION_EXPIRED)));
+    if (action) return familyAction(ctx, event, action);
     if (isAdmin && data === 'action=invite_family') return issueInvite(ctx, event, user, 'family', null);
     if (isAdmin && data === 'action=invite_parent') {
       if ((await countUsers(ctx.db, 'parent')) >= MAX_PARENTS) {
@@ -330,9 +352,66 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
     case 'しょうたい':
       if (isAdmin) return void (await reply(ctx, event, inviteChoice()));
       break;
-    // TODO ⑨⑫⑭：ようす・おやすみ・さいかい・じかん・なまえ・デモ用コマンド
+    case 'おやすみ':
+      return startFamilyAction(ctx, event, 'どなたの見守りをお休みにしますか？', (p) => ({ a: 'pause', p }));
+    case 'さいかい':
+      return startFamilyAction(ctx, event, 'どなたの見守りを再開しますか？', (p) => ({ a: 'resume', p }));
+    case 'じかん':
+      return startFamilyAction(ctx, event, 'どなたの朝のメッセージの時刻を変えますか？', (p) => ({ a: 'time', p }));
+    // TODO：なまえ
   }
   await reply(ctx, event, usageText(isAdmin));
+}
+
+/** おやすみ・さいかい・じかんの最初：親が2人なら選んでもらう。1人なら次の手順へ（§10.1） */
+async function startFamilyAction(
+  ctx: Ctx,
+  event: LineEvent,
+  question: string,
+  action: (p: number) => FamilyAction,
+): Promise<void> {
+  const parents = (await listParentsForStatus(ctx.db)).map((p) => ({ id: p.id, name: p.display_name ?? 'ご家族' }));
+  if (parents.length === 0) return void (await reply(ctx, event, text('親御さんがまだ登録されていません。')));
+  if (parents.length === 1) return familyAction(ctx, event, action(parents[0]!.id));
+  await reply(ctx, event, chooseParentMessage(question, parents, action, ctx.now));
+}
+
+/** おやすみ・さいかい・じかんの各手順（§10.3, §10.4）。結果は操作した家族にだけ返す */
+async function familyAction(ctx: Ctx, event: LineEvent, action: FamilyAction): Promise<void> {
+  const parent = await getParentById(ctx.db, action.p);
+  if (!parent) return void (await reply(ctx, event, text('親御さんが見つかりませんでした。もう一度はじめから操作してください。')));
+  const choice = { id: parent.id, name: parent.display_name ?? 'ご家族' };
+  const info = toParentInfo(parent);
+
+  switch (action.a) {
+    case 'pause':
+      return void (await reply(ctx, event, pauseDateMessage(choice, ctx.today, ctx.now)));
+    case 'pause_until': {
+      const until = event.postback?.params?.date;
+      if (!isValidPauseUntil(until, ctx.today)) {
+        return void (await reply(ctx, event, text('今日より前の日は選べません。もう一度「おやすみ」から始めてください。')));
+      }
+      await setPauseUntil(ctx.db, parent.id, until);
+      return void (await reply(ctx, event, text(pauseDoneText(choice.name, until, ctx.today))));
+    }
+    case 'resume': {
+      const outcome = resumeOutcome(info, ctx.today);
+      if (outcome === 'resume_tomorrow') await setPauseUntil(ctx.db, parent.id, ctx.today);
+      return void (await reply(ctx, event, text(resumeText(choice.name, outcome, ctx.today))));
+    }
+    case 'time':
+      return void (await reply(ctx, event, chooseHourMessage(choice, info.sendTime, ctx.now)));
+    case 'time_h':
+      if (action.h === 10) return familyAction(ctx, event, { a: 'time_set', p: action.p, v: '10:00' });
+      return void (await reply(ctx, event, chooseMinuteMessage(choice, action.h, ctx.now)));
+    case 'time_set': {
+      const day = await getDay(ctx.db, parent.id, ctx.today);
+      const apply = sendTimeApply(day.morningSentAt !== null);
+      await setSendTime(ctx.db, parent.id, action.v, apply === 'today');
+      const watched = isWatchedToday(info, ctx.today);
+      return void (await reply(ctx, event, text(sendTimeDoneText(choice.name, action.v, apply, ctx.today, toJst(ctx.now).minutes, watched))));
+    }
+  }
 }
 
 /** 招待コードを発行する（§9.3）。親の場合は、押して送信するだけの登録用リンクも付ける（§9.5） */
