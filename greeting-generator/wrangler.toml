@@ -1,0 +1,16 @@
+# 共通の挨拶文生成システム（仕様書 §3.2）
+# 毎日 日本時間 3:00 に Claude でその日の挨拶文を作り、KV に保存して公開する。
+# 失敗・不合格のときは 4:00 にもう1回だけ作り直す。
+name = "yoi-ichinichi-greeting"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["0 18 * * *", "0 19 * * *"]
+
+[[kv_namespaces]]
+binding = "GREETINGS"
+id = "2ce445b528d648328c5346eccf6bc2d5"
+
+# シークレット（コードには書かない）：ANTHROPIC_API_KEY

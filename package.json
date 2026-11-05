@@ -18,5 +18,11 @@
     "typescript": "^7.0.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.157.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0"
+  },
+  "allowScripts": {
+    "workerd@1.20261103.1": true
   }
 }
