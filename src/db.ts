@@ -380,3 +380,44 @@ export async function resetUnwellNotice(db: D1Database, parentId: number, date: 
     .bind(parentId, date, at)
     .run();
 }
+
+// ---- ようす（§10.2, §12.4） ----
+
+/** 「ようす」に表示する親（ブロック中も含める） */
+export async function listParentsForStatus(db: D1Database): Promise<UserRow[]> {
+  const r = await db
+    .prepare(`SELECT * FROM users WHERE role = 'parent' AND status != 'removed' ORDER BY id`)
+    .all<UserRow>();
+  return r.results;
+}
+
+export async function getDaysRange(
+  db: D1Database,
+  parentId: number,
+  from: string,
+  to: string,
+): Promise<import('./status').StatusDay[]> {
+  const r = await db
+    .prepare(`SELECT * FROM daily_status WHERE parent_id = ? AND date BETWEEN ? AND ? ORDER BY date`)
+    .bind(parentId, from, to)
+    .all<DayRow & { date: string; reply_method: ReplyMethod | null }>();
+  return r.results.map((d) => ({
+    date: d.date,
+    morningSentAt: d.morning_sent_at,
+    morningFailed: d.morning_failed === 1,
+    reminderSentAt: d.reminder_sent_at,
+    noonCheckedAt: d.noon_checked_at,
+    firstReplyAt: d.first_reply_at,
+    replyMethod: d.reply_method,
+    unwellNotifiedAt: d.unwell_notified_at,
+    unwellCancelledAt: d.unwell_cancelled_at,
+  }));
+}
+
+export async function countFailuresSince(db: D1Database, since: number): Promise<number> {
+  const r = await db
+    .prepare(`SELECT COUNT(*) AS n FROM notification_failures WHERE failed_at >= ?`)
+    .bind(since)
+    .first<{ n: number }>();
+  return r?.n ?? 0;
+}

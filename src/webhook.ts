@@ -5,12 +5,15 @@ import {
   claimUnwellCancel,
   claimUnwellNotice,
   clearConversation,
+  countFailuresSince,
   countUsers,
   createInvite,
   findInvite,
   getConversation,
+  getDaysRange,
   getUserByLineId,
   insertUser,
+  listParentsForStatus,
   markEventProcessed,
   markThanksSent,
   recentInviteAttempts,
@@ -18,6 +21,7 @@ import {
   registerAdmin,
   resetUnwellNotice,
   setConversation,
+  toParentInfo,
   useInvite,
   type UserRow,
 } from './db';
@@ -48,7 +52,8 @@ import {
   usageText,
 } from './line/messages';
 import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
-import { DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
+import { formatParentStatus, STATUS_LEGEND } from './status';
+import { addDays, DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
 import { notifyFamily, runDemo, type DemoCommand, type Deps } from './watch';
 
 export const MAX_PARENTS = 2;
@@ -289,6 +294,8 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   }
 
   switch (input) {
+    case 'ようす':
+      return void (await reply(ctx, event, text(await statusText(ctx, isAdmin))));
     case 'しょうたい':
       if (isAdmin) return void (await reply(ctx, event, inviteChoice()));
       break;
@@ -339,4 +346,22 @@ async function issueInvite(
     text(`ご家族の招待コード：${code}\n（24時間有効・1回だけ使えます）`),
     text(`追加するご家族に、このアカウントを友だち追加して、コードを送ってもらってください。${addLink}`),
   );
+}
+
+/** ようす（§10.2）。管理者には送信できなかったお知らせの件数も表示する（§12.4） */
+async function statusText(ctx: Ctx, isAdmin: boolean): Promise<string> {
+  const parents = await listParentsForStatus(ctx.db);
+  if (parents.length === 0) return '親御さんがまだ登録されていません。「しょうたい」から招待できます。';
+  const from = addDays(ctx.today, -6);
+  const blocks: string[] = [];
+  for (const p of parents) {
+    const days = await getDaysRange(ctx.db, p.id, from, ctx.today);
+    blocks.push(formatParentStatus(p.display_name ?? 'ご家族', toParentInfo(p), ctx.today, days));
+  }
+  let out = `${blocks.join('\n\n')}\n\n${STATUS_LEGEND}`;
+  if (isAdmin) {
+    const failures = await countFailuresSince(ctx.db, ctx.now - 7 * 24 * 60 * MINUTE_MS);
+    if (failures > 0) out += `\n\n送信できなかったお知らせがあります（この7日間で${failures}件）`;
+  }
+  return out;
 }
