@@ -421,3 +421,53 @@ export async function countFailuresSince(db: D1Database, since: number): Promise
     .first<{ n: number }>();
   return r?.n ?? 0;
 }
+
+// ---- 親からの入力の記録（11/5 の仕様変更。migrations/0002_inputs.sql） ----
+
+export async function insertInput(
+  db: D1Database,
+  parentId: number,
+  kind: string,
+  detail: string | null,
+  now: number,
+): Promise<void> {
+  await db
+    .prepare(`INSERT INTO inputs (parent_id, received_at, kind, detail) VALUES (?, ?, ?, ?)`)
+    .bind(parentId, now, kind, detail)
+    .run();
+}
+
+/** 「入力がありました」を送る権利を取る。前回から intervalMs 以内なら false（同時に届いても1回だけ） */
+export async function claimInputNotice(db: D1Database, parentId: number, now: number, intervalMs: number): Promise<boolean> {
+  const r = await db
+    .prepare(
+      `UPDATE users SET input_notified_at = ?
+       WHERE id = ? AND (input_notified_at IS NULL OR input_notified_at <= ?)`,
+    )
+    .bind(now, parentId, now - intervalMs)
+    .run();
+  return r.meta.changes === 1;
+}
+
+export interface InputRow {
+  kind: string;
+  detail: string | null;
+  received_at: number;
+}
+
+/** 新しい順に limit 件 */
+export async function listRecentInputs(db: D1Database, parentId: number, since: number, limit: number): Promise<InputRow[]> {
+  const r = await db
+    .prepare(
+      `SELECT kind, detail, received_at FROM inputs
+       WHERE parent_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`,
+    )
+    .bind(parentId, since, limit)
+    .all<InputRow>();
+  return r.results;
+}
+
+export async function deleteInputsBefore(db: D1Database, before: number): Promise<number> {
+  const r = await db.prepare(`DELETE FROM inputs WHERE received_at < ?`).bind(before).run();
+  return r.meta.changes;
+}

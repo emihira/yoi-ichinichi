@@ -119,6 +119,11 @@ export function familyUnwellCancelled(name: string, clock: string): LineMessage 
 
 export const UNWELL_CANCELLED = text('取り消しました。今日も良い一日となりますように');
 
+/** 親から入力があったとき（11/5 の仕様変更）。本文は入れず、内容は「ようす」で確かめてもらう */
+export function familyInput(name: string, clock: string, label: string): LineMessage {
+  return text(`${honorific(name)}から入力がありました（${clock}・${label}）。\n内容は「ようす」と送ると確かめられます。`);
+}
+
 // ---- 登録（§9） ----
 
 export const ASK_INVITE_CODE = text('招待コードを送ってください。');

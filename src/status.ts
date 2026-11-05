@@ -1,9 +1,17 @@
 // 「ようす」の表示（仕様書 §10.2）
 // DB から読んだ値を受け取り、文字列を組み立てるだけ（テストで確かめられるように）。
 
+import { formatInputLine, type InputKind } from './input';
 import { honorific } from './line/messages';
 import { isPaused, type ParentInfo, type ReplyMethod } from './rules';
 import { addDays, formatJstClock } from './time';
+
+/** 親からの入力（新しい順） */
+export interface StatusInput {
+  kind: InputKind;
+  detail: string | null;
+  receivedAt: number;
+}
 
 export interface StatusDay {
   date: string;
@@ -38,6 +46,7 @@ export function formatParentStatus(
   parent: ParentInfo,
   today: string,
   days: StatusDay[],
+  inputs: StatusInput[] = [],
 ): string {
   const byDate = new Map(days.map((d) => [d.date, d]));
   const t = byDate.get(today);
@@ -70,6 +79,12 @@ export function formatParentStatus(
     lines.push(
       `ぐあいがわるい（${formatJstClock(t.unwellNotifiedAt)}）${cancelled ? ' → 押しまちがいで取り消し' : ''}`,
     );
+  }
+
+  // 最近の入力（新しい順）
+  if (inputs.length > 0) {
+    lines.push('最近の入力：');
+    for (const i of inputs) lines.push(`・${formatInputLine(i.kind, i.detail, i.receivedAt, today)}`);
   }
 
   // この7日間（古い日 → 今日）

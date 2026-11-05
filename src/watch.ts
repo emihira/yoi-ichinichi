@@ -69,7 +69,7 @@ async function watchParent(deps: Deps, parent: UserRow): Promise<void> {
   }
 
   // ② リマインド
-  const suspended = (await getPushCount(db, today.slice(0, 7))) > REMINDER_STOP_THRESHOLD;
+  const suspended = await remindersSuspended(deps);
   if (shouldSendReminder(info, day, now, suspended) && (await claim(db, parent.id, today, 'reminder_sent_at', now))) {
     const greeting = await todaysGreeting(deps, today);
     await pushCounted(deps, parent, morningMessage(greeting, true), 'reminder');
@@ -120,6 +120,11 @@ export async function notifyFamily(deps: Deps, msg: LineMessage, kind: string): 
   await addPushCount(db, toJst(now).date.slice(0, 7), success);
   await logSend(db, kind, now, family.length, success);
   return { target: family.length, success };
+}
+
+/** 今月の送信数が上限の目安を超えたか。超えたらリマインドと「入力がありました」を止め、朝のメッセージと大事な通知に枠を残す */
+export async function remindersSuspended(deps: Deps): Promise<boolean> {
+  return (await getPushCount(deps.db, toJst(deps.now).date.slice(0, 7))) > REMINDER_STOP_THRESHOLD;
 }
 
 // ---- デモモード（§16.2）：DEMO_MODE=true のときだけ、管理者が使える ----

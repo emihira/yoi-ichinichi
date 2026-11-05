@@ -2,6 +2,7 @@
 
 import {
   addInviteAttempt,
+  claimInputNotice,
   claimUnwellCancel,
   claimUnwellNotice,
   clearConversation,
@@ -12,7 +13,9 @@ import {
   getConversation,
   getDaysRange,
   getUserByLineId,
+  insertInput,
   insertUser,
+  listRecentInputs,
   listParentsForStatus,
   markEventProcessed,
   markThanksSent,
@@ -41,6 +44,7 @@ import {
   ASK_RETAP_LINK,
   inviteCard,
   honorific,
+  familyInput,
   familyUnwell,
   familyUnwellCancelled,
   FAMILY_NOTICE,
@@ -54,9 +58,10 @@ import {
   usageText,
 } from './line/messages';
 import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
+import { describeInput, INPUT_NOTICE_INTERVAL_MS, INPUT_RETENTION_DAYS, INPUT_SHOW_MAX, inputLabel, isInputNoticeTarget, type InputKind } from './input';
 import { formatParentStatus, STATUS_LEGEND } from './status';
 import { addDays, DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
-import { notifyFamily, runDemo, type DemoCommand, type Deps } from './watch';
+import { notifyFamily, remindersSuspended, runDemo, type DemoCommand, type Deps } from './watch';
 
 export const MAX_PARENTS = 2;
 export const MAX_FAMILY = 3;
@@ -77,7 +82,7 @@ export interface LineEvent {
   webhookEventId: string;
   replyToken?: string;
   source?: { type: string; userId?: string };
-  message?: { type: string; text?: string };
+  message?: { type: string; text?: string; duration?: number };
   postback?: { data: string };
 }
 
@@ -219,17 +224,31 @@ async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promis
     return cancelUnwell(ctx, event, parent);
   }
 
+  // 入力はすべて記録する（家族が「ようす」で内容を確かめられるように。11/5 の仕様変更）
+  const input = describeInput(event);
+  if (input) await insertInput(ctx.db, parent.id, input.kind, input.detail, ctx.now);
+
   const method = classifyReply(event);
-  if (method === null) return; // 画像・動画・位置情報などは記録も返事もしない（§5.1）
-
-  const first = await recordFirstReply(ctx.db, parent.id, ctx.today, ctx.now, method);
-
-  if (method === 'button_unwell') return notifyUnwell(ctx, event, parent);
-
-  // お礼は「その日最初の返信」が「正午より前」のときだけ（§5.3, §5.4）
-  if (first && isBeforeNoon(ctx.now) && (await reply(ctx, event, THANKS))) {
-    await markThanksSent(ctx.db, parent.id, ctx.today);
+  if (method !== null) {
+    // 画像・動画・位置情報などは「返事」には数えず、お礼も返さない（§5.1）
+    const first = await recordFirstReply(ctx.db, parent.id, ctx.today, ctx.now, method);
+    if (method === 'button_unwell') return notifyUnwell(ctx, event, parent);
+    // お礼は「その日最初の返信」が「正午より前」のときだけ（§5.3, §5.4）
+    if (first && isBeforeNoon(ctx.now) && (await reply(ctx, event, THANKS))) {
+      await markThanksSent(ctx.db, parent.id, ctx.today);
+    }
   }
+
+  if (input) await notifyInput(ctx, parent, input.kind);
+}
+
+/** 家族へ「入力がありました」。1時間に1回まで。送信枠が残り少ないときは送らない */
+async function notifyInput(ctx: Ctx, parent: UserRow, kind: InputKind): Promise<void> {
+  if (!isInputNoticeTarget(kind)) return;
+  if (await remindersSuspended(deps(ctx))) return;
+  if (!(await claimInputNotice(ctx.db, parent.id, ctx.now, INPUT_NOTICE_INTERVAL_MS))) return;
+  const name = parent.display_name ?? 'ご家族';
+  await notifyFamily(deps(ctx), familyInput(name, formatJstClock(ctx.now), inputLabel(kind)), 'input');
 }
 
 /** 不調ボタン：家族全員へ即時通知（§6）。時間帯に関係なく有効 */
@@ -353,7 +372,13 @@ async function statusText(ctx: Ctx, isAdmin: boolean): Promise<string> {
   const blocks: string[] = [];
   for (const p of parents) {
     const days = await getDaysRange(ctx.db, p.id, from, ctx.today);
-    blocks.push(formatParentStatus(p.display_name ?? 'ご家族', toParentInfo(p), ctx.today, days));
+    const since = ctx.now - INPUT_RETENTION_DAYS * 24 * 60 * MINUTE_MS;
+    const inputs = (await listRecentInputs(ctx.db, p.id, since, INPUT_SHOW_MAX)).map((i) => ({
+      kind: i.kind as InputKind,
+      detail: i.detail,
+      receivedAt: i.received_at,
+    }));
+    blocks.push(formatParentStatus(p.display_name ?? 'ご家族', toParentInfo(p), ctx.today, days, inputs));
   }
   let out = `${blocks.join('\n\n')}\n\n${STATUS_LEGEND}`;
   if (isAdmin) {
