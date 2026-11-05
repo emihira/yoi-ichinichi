@@ -41,8 +41,8 @@ describe('ようす（§10.2）', () => {
     const days = [
       day(TODAY, { morningSentAt: jst(TODAY, '07:30'), reminderSentAt: jst(TODAY, '08:30') }),
     ];
-    const out = formatParentStatus('きみえさん', parent, TODAY, days);
-    expect(out).toContain('【きみえさん】');
+    const out = formatParentStatus('はなこさん', parent, TODAY, days);
+    expect(out).toContain('【はなこさん】');
     expect(out).toContain('お返事：まだありません（リマインド 8:30 送信済み）');
     expect(out).toContain('この7日間：－－－－－－－');
   });

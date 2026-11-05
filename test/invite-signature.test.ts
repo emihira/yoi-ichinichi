@@ -70,7 +70,7 @@ describe('文章からの招待コードの取り出し', async () => {
     expect(extractInviteCodes('abcd2345')).toEqual(['ABCD2345']);
   });
   it('招待のメッセージを丸ごと貼り付けても取り出せる', () => {
-    expect(extractInviteCodes('きみえさんの招待コード：ABCD2345\n（24時間有効・1回だけ使えます）')).toEqual(['ABCD2345']);
+    expect(extractInviteCodes('はなこさんの招待コード：ABCD2345\n（24時間有効・1回だけ使えます）')).toEqual(['ABCD2345']);
   });
   it('登録用リンクの文章からも取り出せる', () => {
     expect(extractInviteCodes('下のリンクを押してください\nhttps://line.me/R/oaMessage/%40696kjrde/?ABCD2345')).toEqual([

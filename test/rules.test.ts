@@ -157,7 +157,7 @@ describe('呼び名の敬称', async () => {
   const { honorific } = await import('../src/line/messages');
   it('「さん」などで終わっていなければ「さん」を付ける', () => {
     expect(honorific('母')).toBe('母さん');
-    expect(honorific('ちゃこさん')).toBe('ちゃこさん');
+    expect(honorific('はなこさん')).toBe('はなこさん');
     expect(honorific('お母様')).toBe('お母様');
     expect(honorific('みよちゃん')).toBe('みよちゃん');
   });
