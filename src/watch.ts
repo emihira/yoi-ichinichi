@@ -8,6 +8,7 @@ import {
   claim,
   claimSetting,
   deleteExpired,
+  getAdmin,
   getCachedGreeting,
   getDay,
   getPushCount,
@@ -18,14 +19,16 @@ import {
   logSend,
   markMorningFailed,
   markNoonNotified,
+  setAdminNoticeResult,
   setSetting,
   toParentInfo,
   type UserRow,
 } from './db';
 import type { Env } from './env';
+import { adminNoticePlan, isImportantKind, retryResultLabel } from './failure';
 import { fallbackGreeting, fetchGreetingFromApi } from './greeting';
-import { createLineClient, type LineClient, type LineMessage } from './line/client';
-import { familyMorningFailed, familyNoReply, morningMessage, REMINDER_STOPPED } from './line/messages';
+import { createLineClient, type LineClient, type LineMessage, type PushResult } from './line/client';
+import { ADMIN_SEND_FAILED, familyMorningFailed, familyNoReply, morningMessage, REMINDER_STOPPED } from './line/messages';
 import { effectivePushCount, isOverStopThreshold, retentionCutoffs } from './quota';
 import { noonOutcome, shouldRunNoonCheck, shouldSendMorning, shouldSendReminder } from './rules';
 import { toJst } from './time';
@@ -151,9 +154,29 @@ async function pushCounted(deps: Deps, user: UserRow, msg: LineMessage, kind: st
   const { db, line, now } = deps;
   const r = await line.push(user.line_user_id, [msg], crypto.randomUUID());
   if (r.ok) await addPushCount(db, toJst(now).date.slice(0, 7), 1);
-  else await logFailure(db, kind, user.id, now, r.error);
   await logSend(db, kind, now, 1, r.ok ? 1 : 0);
+  if (!r.ok) await handleFailures(deps, kind, [{ user, result: r }]);
   return r.ok;
+}
+
+/**
+ * 送れなかった相手を失敗履歴に記録し、重要な通知なら管理者へ1通だけ知らせる（§12.2〜§12.4）。
+ * 管理者への通知も失敗したら、その結果も履歴に残す（「ようす」の末尾に件数が出る）
+ */
+async function handleFailures(deps: Deps, kind: string, failures: { user: UserRow; result: PushResult }[]): Promise<void> {
+  const { db, line, now } = deps;
+  const ids: number[] = [];
+  for (const f of failures) {
+    ids.push(await logFailure(db, kind, f.user.id, now, f.result.error, retryResultLabel(f.result)));
+  }
+  if (!isImportantKind(kind)) return;
+  const admin = await getAdmin(db);
+  const plan = adminNoticePlan(admin?.id ?? null, failures.map((f) => f.user.id));
+  if (plan !== 'send' || !admin) return setAdminNoticeResult(db, ids, plan);
+  const r = await line.push(admin.line_user_id, [ADMIN_SEND_FAILED], crypto.randomUUID());
+  if (r.ok) await addPushCount(db, toJst(now).date.slice(0, 7), 1);
+  await logSend(db, 'admin_alert', now, 1, r.ok ? 1 : 0);
+  await setAdminNoticeResult(db, ids, r.ok ? 'sent' : `failed:${retryResultLabel(r)}`);
 }
 
 /** 家族全員へ1人ずつ push する。成功した人数を返す（§11.2） */
@@ -161,13 +184,15 @@ export async function notifyFamily(deps: Deps, msg: LineMessage, kind: string): 
   const { db, line, now } = deps;
   const family = await listFamily(db);
   let success = 0;
+  const failures: { user: UserRow; result: PushResult }[] = [];
   for (const f of family) {
     const r = await line.push(f.line_user_id, [msg], crypto.randomUUID());
     if (r.ok) success++;
-    else await logFailure(db, kind, f.id, now, r.error);
+    else failures.push({ user: f, result: r });
   }
   await addPushCount(db, toJst(now).date.slice(0, 7), success);
   await logSend(db, kind, now, family.length, success);
+  if (failures.length > 0) await handleFailures(deps, kind, failures);
   return { target: family.length, success };
 }
 

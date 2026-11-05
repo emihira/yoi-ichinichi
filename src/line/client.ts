@@ -14,6 +14,8 @@ export interface PushResult {
   status: number;
   /** 月間の送信上限に達した（再試行しない） */
   quotaExceeded: boolean;
+  /** 1回やり直したか（§12.2） */
+  retried?: boolean;
   error?: string;
 }
 
@@ -66,7 +68,7 @@ export function createLineClient(accessToken: string, fetchImpl: typeof fetch = 
       if (first.ok || first.quotaExceeded) return first;
       // 400番台（宛先の間違いなど）は再試行しても直らないが、通信エラーと5xx・429は1回だけやり直す
       if (first.status >= 400 && first.status < 500 && first.status !== 429) return first;
-      return send();
+      return { ...(await send()), retried: true };
     },
 
     async getUsage() {

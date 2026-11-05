@@ -218,17 +218,32 @@ export async function logSend(db: D1Database, kind: string, now: number, target:
     .run();
 }
 
+/** 失敗履歴を記録し、その行のIDを返す（§12.4） */
 export async function logFailure(
   db: D1Database,
   kind: string,
   targetUser: number | null,
   now: number,
   error: string | undefined,
-) {
-  await db
-    .prepare(`INSERT INTO notification_failures (kind, target_user, failed_at, error) VALUES (?, ?, ?, ?)`)
-    .bind(kind, targetUser, now, error ?? null)
+  retryResult: string | null = null,
+): Promise<number> {
+  const r = await db
+    .prepare(`INSERT INTO notification_failures (kind, target_user, failed_at, error, retry_result) VALUES (?, ?, ?, ?, ?)`)
+    .bind(kind, targetUser, now, error ?? null, retryResult)
     .run();
+  return Number(r.meta.last_row_id);
+}
+
+/** 管理者への通知の結果を、失敗履歴に書き足す（§12.3, §12.4） */
+export async function setAdminNoticeResult(db: D1Database, failureIds: number[], result: string): Promise<void> {
+  if (failureIds.length === 0) return;
+  await db.batch(
+    failureIds.map((id) => db.prepare(`UPDATE notification_failures SET admin_notice = ? WHERE id = ?`).bind(result, id)),
+  );
+}
+
+export async function getAdmin(db: D1Database): Promise<UserRow | null> {
+  return db.prepare(`SELECT * FROM users WHERE is_admin = 1 AND status = 'active'`).first<UserRow>();
 }
 
 // ---- 登録（§9） ----

@@ -139,6 +139,9 @@ export function familyParentUnblocked(name: string): LineMessage {
   return text(`${honorific(name)}のLINEで、ブロックが解除されました。朝のメッセージを再開します。`);
 }
 
+/** 重要な通知が再試行しても届かなかったとき、管理者へ（§12.3） */
+export const ADMIN_SEND_FAILED = text('見守り通知の送信に失敗しました。LINEの設定や送信数をご確認ください。');
+
 // ---- 登録（§9） ----
 
 export const ASK_INVITE_CODE = text('招待コードを送ってください。');
