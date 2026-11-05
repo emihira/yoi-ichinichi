@@ -63,3 +63,23 @@ describe('Webhook の署名検証（§13.5）', () => {
     expect(await verifySignature(secret, body, null)).toBe(false);
   });
 });
+
+describe('文章からの招待コードの取り出し', async () => {
+  const { extractInviteCodes } = await import('../src/invite');
+  it('コードだけなら、そのまま（小文字・全角も可）', () => {
+    expect(extractInviteCodes('abcd2345')).toEqual(['ABCD2345']);
+  });
+  it('招待のメッセージを丸ごと貼り付けても取り出せる', () => {
+    expect(extractInviteCodes('きみえさんの招待コード：ABCD2345\n（24時間有効・1回だけ使えます）')).toEqual(['ABCD2345']);
+  });
+  it('登録用リンクの文章からも取り出せる', () => {
+    expect(extractInviteCodes('下のリンクを押してください\nhttps://line.me/R/oaMessage/%40696kjrde/?ABCD2345')).toEqual([
+      'ABCD2345',
+    ]);
+  });
+  it('ふつうの文章や、長い英数字の一部は取り出さない', () => {
+    expect(extractInviteCodes('おはよう、元気です')).toEqual([]);
+    expect(extractInviteCodes('ABCD2345EFGH')).toEqual([]);
+    expect(extractInviteCodes('%40696kjrde')).toEqual([]);
+  });
+});

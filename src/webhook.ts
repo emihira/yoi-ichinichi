@@ -28,16 +28,18 @@ import {
 import type { Env } from './env';
 import {
   canAttemptInvite,
+  extractInviteCodes,
   generateInviteCode,
   hashInviteCode,
   INVITE_ATTEMPT_WINDOW_MS,
   INVITE_TTL_MS,
   isInviteUsable,
-  looksLikeInviteCode,
 } from './invite';
 import { createLineClient, type LineClient } from './line/client';
 import {
   ASK_INVITE_CODE,
+  ASK_RETAP_LINK,
+  inviteCard,
   honorific,
   familyUnwell,
   familyUnwellCancelled,
@@ -129,8 +131,12 @@ async function handleEvent(ctx: Ctx, event: LineEvent): Promise<void> {
 // ---- 登録前の人（§9.2, §9.9） ----
 
 async function handleUnregistered(ctx: Ctx, event: LineEvent, userId: string): Promise<void> {
+  if (event.type === 'follow') {
+    await reply(ctx, event, ASK_RETAP_LINK); // 友だち追加だけで止まってしまったときの案内
+    return;
+  }
   if (event.type !== 'message' || event.message?.type !== 'text') {
-    if (event.type === 'follow' || event.type === 'message') await reply(ctx, event, ASK_INVITE_CODE);
+    if (event.type === 'message') await reply(ctx, event, ASK_INVITE_CODE);
     return;
   }
   const input = event.message.text ?? '';
@@ -149,12 +155,13 @@ async function handleUnregistered(ctx: Ctx, event: LineEvent, userId: string): P
     // 管理者が登録済みなら、管理者コードは受け付けない（ふつうの未登録者と同じ返事）
   }
 
-  if (looksLikeInviteCode(input)) return redeemInvite(ctx, event, userId, input);
+  const codes = extractInviteCodes(input);
+  if (codes.length > 0) return redeemInvite(ctx, event, userId, codes);
   await reply(ctx, event, ASK_INVITE_CODE);
 }
 
 /** 招待コードの照合と登録（§9.3〜§9.5） */
-async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: string): Promise<void> {
+async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, codes: string[]): Promise<void> {
   const attempts = await recentInviteAttempts(ctx.db, userId, ctx.now - INVITE_ATTEMPT_WINDOW_MS);
   if (!canAttemptInvite(attempts, ctx.now)) {
     await reply(ctx, event, text('入力が続いたため、しばらく受け付けを止めています。1時間ほどしてから、もう一度送ってください。'));
@@ -162,7 +169,11 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: s
   }
   await addInviteAttempt(ctx.db, userId, ctx.now);
 
-  const invite = await findInvite(ctx.db, await hashInviteCode(input));
+  let invite = null;
+  for (const code of codes) {
+    invite = await findInvite(ctx.db, await hashInviteCode(code));
+    if (invite) break;
+  }
   const usable = invite !== null && isInviteUsable({ expiresAt: invite.expires_at, usedAt: invite.used_at }, ctx.now);
   if (!invite || !usable) {
     await reply(ctx, event, text('招待コードが正しくないか、有効期限が切れています。ご家族に確認してください。'));
@@ -282,7 +293,7 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   }
 
   // 家族が親用の登録リンクを押してしまった場合
-  if (looksLikeInviteCode(input)) {
+  if (extractInviteCodes(input).length > 0) {
     await reply(ctx, event, text('すでにご家族として登録されています。このリンクはご両親のスマートフォンで開いてください。'));
     return;
   }
@@ -325,27 +336,13 @@ async function issueInvite(
   );
 
   const oaId = ctx.env.LINE_OA_ID;
-  if (kind === 'parent') {
-    const link = oaId ? `https://line.me/R/oaMessage/${encodeURIComponent(oaId)}/?${code}` : null;
-    await reply(
-      ctx,
-      event,
-      text(`${honorific(parentName ?? '')}の招待コード：${code}\n（24時間有効・1回だけ使えます）`),
-      text(
-        link
-          ? `次のリンクを${honorific(parentName ?? '')}のLINEに送ってください。押して「送信」を押すだけで登録できます。\n${link}`
-          : `${honorific(parentName ?? '')}のLINEで、このアカウントを友だち追加し、上のコードを送ってもらってください。`,
-      ),
-    );
-    return;
-  }
-  const addLink = oaId ? `\n友だち追加：https://line.me/R/ti/p/${encodeURIComponent(oaId)}` : '';
-  await reply(
-    ctx,
-    event,
-    text(`ご家族の招待コード：${code}\n（24時間有効・1回だけ使えます）`),
-    text(`追加するご家族に、このアカウントを友だち追加して、コードを送ってもらってください。${addLink}`),
-  );
+  const who = kind === 'parent' ? honorific(parentName ?? '') : 'ご家族';
+  const link = oaId
+    ? kind === 'parent'
+      ? `https://line.me/R/oaMessage/${encodeURIComponent(oaId)}/?${code}`
+      : `https://line.me/R/ti/p/${encodeURIComponent(oaId)}`
+    : null;
+  await reply(ctx, event, ...inviteCard(kind, who, code, link));
 }
 
 /** ようす（§10.2）。管理者には送信できなかったお知らせの件数も表示する（§12.4） */

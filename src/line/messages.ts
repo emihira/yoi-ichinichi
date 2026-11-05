@@ -123,6 +123,10 @@ export const UNWELL_CANCELLED = text('取り消しました。今日も良い一
 
 export const ASK_INVITE_CODE = text('招待コードを送ってください。');
 
+export const ASK_RETAP_LINK = text(
+  '友だち追加ありがとうございます。\nご家族から届いたリンクを、もう一度押してください。文字が入った画面になったら「送信」を押すと登録できます。\n\n（招待コードを直接送っていただいても登録できます）',
+);
+
 export const FAMILY_NOTICE =
   'このサービスは、ご家族の見守りを補助するものです。緊急通報や安否を保証するサービスではありません。\n\n' +
   '通信障害やLINEの送信上限などにより、通知が届かない場合があります。また、送信に失敗したこと自体をお知らせできない場合もあります。\n\n' +
@@ -154,4 +158,49 @@ export function inviteChoice(): LineMessage {
       ],
     },
   };
+}
+
+/**
+ * 招待コードの案内（§9.3〜§9.5）。
+ * 1通目：管理者向け。［コードをコピー］［リンクをコピー］で、必要な文字だけをコピーできる。
+ * 2通目：そのまま転送する用。招待される人向けの説明とリンク（とコード）を1通にまとめる。
+ *        丸ごと貼り付けて送られても、文章の中からコードを取り出して登録できる。
+ */
+export function inviteCard(kind: 'family' | 'parent', who: string, code: string, link: string | null): LineMessage[] {
+  const buttons: Record<string, unknown>[] = [
+    { type: 'button', style: 'primary', action: { type: 'clipboard', label: 'コードをコピー', clipboardText: code } },
+  ];
+  if (link) {
+    buttons.push({ type: 'button', style: 'secondary', action: { type: 'clipboard', label: 'リンクをコピー', clipboardText: link } });
+  }
+  const how =
+    kind === 'parent'
+      ? `［リンクをコピー］を押して、${who}のLINEに貼り付けて送ってください。または、下のメッセージを長押しして「転送」してください。`
+      : `［コードをコピー］を押して、追加するご家族に送ってください。または、下のメッセージを長押しして「転送」してください。`;
+  const card: LineMessage = {
+    type: 'flex',
+    altText: `${who}の招待コード：${code}`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        contents: [
+          { type: 'text', text: `${who}の招待コード`, size: 'sm', color: '#666666' },
+          { type: 'text', text: code, size: 'xxl', weight: 'bold' },
+          { type: 'text', text: '24時間有効・1回だけ使えます', size: 'xs', color: '#888888' },
+          { type: 'text', text: how, size: 'sm', wrap: true, margin: 'lg' },
+        ],
+      },
+      footer: { type: 'box', layout: 'vertical', spacing: 'sm', contents: buttons },
+    },
+  };
+  const forward =
+    kind === 'parent'
+      ? link
+        ? `【よい一日のはじまりに　登録のしかた】\n① 下の青い文字を押してください。\n② 「追加」が出たら押してください。\n③ 文字が入った画面になったら「送信」を押してください。\n\n${link}\n\n（うまくいかないときは、このメッセージを長押しして「コピー」し、そのまま送っても登録できます）`
+        : `【よい一日のはじまりに　登録のしかた】\nこのアカウントを友だち追加して、次の招待コードを送ってください。\n${code}`
+      : `【よい一日のはじまりに　ご家族の登録】\n${link ? `① このアカウントを友だち追加してください。\n${link}\n② ` : ''}次の招待コードを送ってください（このメッセージを丸ごとコピーして送っても大丈夫です）。\n${code}`;
+  return [card, text(forward)];
 }

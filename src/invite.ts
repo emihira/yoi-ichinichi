@@ -54,3 +54,16 @@ export function canAttemptInvite(recentAttemptTimes: number[], now: number): boo
   const recent = recentAttemptTimes.filter((t) => now - t < INVITE_ATTEMPT_WINDOW_MS);
   return recent.length < INVITE_ATTEMPT_LIMIT;
 }
+
+const CODE_IN_TEXT = new RegExp(`(?<![A-Za-z0-9])[${INVITE_ALPHABET}]{${INVITE_LENGTH}}(?![A-Za-z0-9])`, 'g');
+
+/**
+ * 送られた文章から、招待コードの候補を取り出す（最大3つ）。
+ * 招待のメッセージを丸ごとコピーして貼り付けたり、登録用リンクの文章を送ったりしても登録できるように。
+ * コードだけが送られたときは、小文字・全角でも受け付ける。
+ */
+export function extractInviteCodes(text: string): string[] {
+  if (looksLikeInviteCode(text)) return [normalizeInviteInput(text)];
+  const found = text.normalize('NFKC').match(CODE_IN_TEXT) ?? [];
+  return [...new Set(found)].slice(0, 3);
+}
