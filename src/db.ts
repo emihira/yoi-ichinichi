@@ -536,3 +536,15 @@ export async function setSendTime(db: D1Database, parentId: number, hhmm: string
     : `UPDATE users SET send_time_next = ? WHERE id = ? AND role = 'parent'`;
   await db.prepare(sql).bind(hhmm, parentId).run();
 }
+
+// ---- ブロック・友だち削除（§9.7） ----
+
+/** 親の状態を切り替える（active ⇔ blocked）。切り替わったら true（同じ通知を2回送らないため） */
+export async function setParentBlocked(db: D1Database, parentId: number, blocked: boolean): Promise<boolean> {
+  const [to, from] = blocked ? ['blocked', 'active'] : ['active', 'blocked'];
+  const r = await db
+    .prepare(`UPDATE users SET status = ? WHERE id = ? AND role = 'parent' AND status = ?`)
+    .bind(to, parentId, from)
+    .run();
+  return r.meta.changes === 1;
+}

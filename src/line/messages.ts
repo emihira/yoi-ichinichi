@@ -129,6 +129,16 @@ export function familyInput(name: string, clock: string, label: string): LineMes
   return text(`${honorific(name)}から入力がありました（${clock}・${label}）。\n内容は「ようす」と送ると確かめられます。`);
 }
 
+/** 親がブロック・友だち削除をしたとき（§9.7） */
+export function familyParentBlocked(name: string): LineMessage {
+  return text(`${honorific(name)}のLINEで、このアカウントがブロックまたは削除されました。朝のメッセージが届かなくなっています。`);
+}
+
+/** 親がブロックを解除したとき（§9.7） */
+export function familyParentUnblocked(name: string): LineMessage {
+  return text(`${honorific(name)}のLINEで、ブロックが解除されました。朝のメッセージを再開します。`);
+}
+
 // ---- 登録（§9） ----
 
 export const ASK_INVITE_CODE = text('招待コードを送ってください。');

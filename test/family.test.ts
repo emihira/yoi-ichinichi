@@ -99,3 +99,18 @@ describe('じかん（§10.4）', () => {
     expect(sendTimeDoneText('はなこ', '07:30', 'today', TODAY, 9 * 60, false)).not.toContain('まもなく');
   });
 });
+
+describe('親のブロック・友だち削除（§9.7）', async () => {
+  const { familyParentBlocked, familyParentUnblocked } = await import('../src/line/messages');
+  const { isWatchedToday } = await import('../src/rules');
+  it('家族へのお知らせの文面', () => {
+    expect(familyParentBlocked('はなこ').text).toBe(
+      'はなこさんのLINEで、このアカウントがブロックまたは削除されました。朝のメッセージが届かなくなっています。',
+    );
+    expect(familyParentUnblocked('はなこ').text).toContain('朝のメッセージを再開します');
+  });
+  it('ブロック中は見守り処理をしない', () => {
+    expect(isWatchedToday({ ...parent, status: 'blocked' }, TODAY)).toBe(false);
+    expect(isWatchedToday(parent, TODAY)).toBe(true);
+  });
+});

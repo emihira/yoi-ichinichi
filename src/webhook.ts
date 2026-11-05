@@ -26,6 +26,7 @@ import {
   registerAdmin,
   resetUnwellNotice,
   setConversation,
+  setParentBlocked,
   setPauseUntil,
   setSendTime,
   toParentInfo,
@@ -64,6 +65,8 @@ import {
   inviteCard,
   honorific,
   familyInput,
+  familyParentBlocked,
+  familyParentUnblocked,
   familyUnwell,
   familyUnwellCancelled,
   FAMILY_NOTICE,
@@ -239,7 +242,7 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, codes: s
 // ---- 親（§5, §6） ----
 
 async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
-  // TODO ⑯：unfollow（ブロック・削除）/ follow（解除）で家族へ通知
+  if (event.type === 'unfollow' || event.type === 'follow') return parentFollowChanged(ctx, parent, event.type === 'unfollow');
   if (event.type === 'postback' && event.postback?.data === POSTBACK_UNWELL_CANCEL) {
     return cancelUnwell(ctx, event, parent);
   }
@@ -260,6 +263,18 @@ async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promis
   }
 
   if (input) await notifyInput(ctx, parent, input.kind);
+}
+
+/**
+ * 親のブロック・友だち削除（unfollow）と、その解除（follow）（§9.7）。
+ * 状態を切り替えて、家族全員に知らせる。ブロック中は朝の送信・リマインド・正午判定をしない（isWatchedToday）。
+ * 送信数の上限が近くても止めない（重要な通知 §12.1）
+ */
+async function parentFollowChanged(ctx: Ctx, parent: UserRow, blocked: boolean): Promise<void> {
+  if (!(await setParentBlocked(ctx.db, parent.id, blocked))) return; // すでにその状態（同じ知らせを重ねない）
+  const name = parent.display_name ?? 'ご家族';
+  const msg = blocked ? familyParentBlocked(name) : familyParentUnblocked(name);
+  await notifyFamily(deps(ctx), msg, blocked ? 'blocked' : 'unblocked');
 }
 
 /** 家族へ「入力がありました」。1時間に1回まで。送信枠が残り少ないときは送らない */
