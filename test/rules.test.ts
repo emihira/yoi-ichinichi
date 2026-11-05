@@ -162,3 +162,17 @@ describe('呼び名の敬称', async () => {
     expect(honorific('みよちゃん')).toBe('みよちゃん');
   });
 });
+
+describe('登録日（午前5時より前は前日の登録）', async () => {
+  const { registrationDate } = await import('../src/rules');
+  it('0:30 の登録は前日、5:00 以降はその日', () => {
+    expect(registrationDate(jst('2026-11-05', '00:30'))).toBe('2026-11-04');
+    expect(registrationDate(jst('2026-11-05', '04:59'))).toBe('2026-11-04');
+    expect(registrationDate(jst('2026-11-05', '05:00'))).toBe('2026-11-05');
+    expect(registrationDate(jst('2026-11-04', '23:30'))).toBe('2026-11-04');
+  });
+  it('0:30 に登録した親には、その日の朝から送る', () => {
+    const p = { ...parent, registeredDate: registrationDate(jst('2026-11-05', '00:30')) };
+    expect(shouldSendMorning(p, EMPTY_DAY, jst('2026-11-05', '08:00'))).toBe(true);
+  });
+});

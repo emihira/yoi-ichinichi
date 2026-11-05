@@ -47,7 +47,7 @@ import {
   unwellAckMessage,
   usageText,
 } from './line/messages';
-import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, UNWELL_DEBOUNCE_MS } from './rules';
+import { classifyReply, isBeforeNoon, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
 import { DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
 import { notifyFamily, runDemo, type DemoCommand, type Deps } from './watch';
 
@@ -132,7 +132,7 @@ async function handleUnregistered(ctx: Ctx, event: LineEvent, userId: string): P
 
   // 最初の管理者登録：管理者コードと一致し、管理者がまだいないときだけ
   if (ctx.env.ADMIN_SETUP_CODE && input.trim() === ctx.env.ADMIN_SETUP_CODE) {
-    if (await registerAdmin(ctx.db, userId, ctx.now, ctx.today)) {
+    if (await registerAdmin(ctx.db, userId, ctx.now, registrationDate(ctx.now))) {
       await reply(
         ctx,
         event,
@@ -180,7 +180,7 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: s
       ctx.db,
       { lineUserId: userId, role: 'parent', displayName: name, sendTime: DEFAULT_SEND_TIME },
       ctx.now,
-      ctx.today,
+      registrationDate(ctx.now),
     );
     await reply(ctx, event, text('登録できました。あしたの朝から、おはようのメッセージをお送りします。'));
     await notifyFamily(
@@ -191,7 +191,7 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, input: s
     return;
   }
 
-  await insertUser(ctx.db, { lineUserId: userId, role: 'family', displayName: null, sendTime: null }, ctx.now, ctx.today);
+  await insertUser(ctx.db, { lineUserId: userId, role: 'family', displayName: null, sendTime: null }, ctx.now, registrationDate(ctx.now));
   await reply(ctx, event, text('ご家族として登録しました。'), text(FAMILY_NOTICE), usageText(false));
 }
 

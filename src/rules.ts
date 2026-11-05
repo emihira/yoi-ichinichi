@@ -2,7 +2,7 @@
 // LINE や D1 には触れない「純粋な関数」だけを置く。現在時刻は引数で受け取るので、
 // 実際の時刻を待たずに自動テストで確かめられる（§19.5）。
 
-import { MINUTE_MS, parseHHMM, toJst } from './time';
+import { addDays, MINUTE_MS, parseHHMM, toJst } from './time';
 
 export const NOON_MINUTES = 12 * 60;
 export const REMINDER_DELAY_MS = 60 * MINUTE_MS;
@@ -36,6 +36,18 @@ export const EMPTY_DAY: DayState = {
   noonCheckedAt: null,
   firstReplyAt: null,
 };
+
+/** 見守りの1日が始まる時刻（朝の送信時刻の下限と同じ 5:00） */
+export const DAY_START_MINUTES = 5 * 60;
+
+/**
+ * 登録日（日本時間）。午前5時より前の登録は前日の登録として扱う。
+ * 夜中の0時過ぎに登録しても、その日の朝から見守りが始まるようにするため。
+ */
+export function registrationDate(now: number): string {
+  const jst = toJst(now);
+  return jst.minutes < DAY_START_MINUTES ? addDays(jst.date, -1) : jst.date;
+}
 
 /** 休止中か（休止の最終日の当日までが休止） */
 export function isPaused(parent: ParentInfo, today: string): boolean {
