@@ -14,11 +14,12 @@ export type FamilyAction =
   | { a: 'pause'; p: number } // 親を選んだ → 終了日のカレンダーへ
   | { a: 'pause_until'; p: number } // カレンダーで日付を選んだ（日付は postback.params.date）
   | { a: 'resume'; p: number }
+  | { a: 'name'; p: number } // 親を選んだ → 新しい呼び名を送ってもらう
   | { a: 'time'; p: number } // 親を選んだ → 時を選ぶ
   | { a: 'time_h'; p: number; h: number } // 時を選んだ → 分を選ぶ
   | { a: 'time_set'; p: number; v: string }; // 時刻が決まった
 
-const ACTIONS = ['pause', 'pause_until', 'resume', 'time', 'time_h', 'time_set'] as const;
+const ACTIONS = ['pause', 'pause_until', 'resume', 'name', 'time', 'time_h', 'time_set'] as const;
 
 /** ボタンに入れる文字列を作る。t はボタンを作った時刻 */
 export function encodeAction(action: FamilyAction, t: number): string {
@@ -50,7 +51,7 @@ export function decodeAction(data: string, now: number): FamilyAction | 'expired
       return isValidSendTime(v) ? { a, p, v } : null;
     }
     default:
-      return { a: a as 'pause' | 'pause_until' | 'resume' | 'time', p };
+      return { a: a as 'pause' | 'pause_until' | 'resume' | 'name' | 'time', p };
   }
 }
 
@@ -191,3 +192,23 @@ export function chooseMinuteMessage(parent: ParentChoice, hour: number, now: num
 
 export const ACTION_EXPIRED =
   'ボタンを押すまでに10分以上たったため、受け付けられませんでした。もう一度「おやすみ」「さいかい」「じかん」から始めてください。';
+
+// ---- なまえ（§10.5） ----
+
+export const PARENT_NAME_MAX = 10;
+
+/** 家族が送る言葉（呼び名の入力待ちのときに送られたら、呼び名にせず、その操作として扱う） */
+export const FAMILY_COMMANDS = ['ようす', 'おやすみ', 'さいかい', 'じかん', 'なまえ', 'つかいかた', 'しょうたい', 'メンバー'];
+
+/** 呼び名として使えるか：1〜10文字、改行なし */
+export function isValidParentName(name: string): boolean {
+  return name.length > 0 && [...name].length <= PARENT_NAME_MAX && !/[\r\n]/.test(name);
+}
+
+export function askNameText(name: string): string {
+  return `${honorific(name)}の新しい呼び名を送ってください（${PARENT_NAME_MAX}文字まで。例：お母さん）。\nご家族へのお知らせと「ようす」で使います。`;
+}
+
+export function nameDoneText(oldName: string, newName: string): string {
+  return `呼び名を「${oldName}」から「${newName}」に変えました。`;
+}

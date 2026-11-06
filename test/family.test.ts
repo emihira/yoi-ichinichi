@@ -114,3 +114,24 @@ describe('親のブロック・友だち削除（§9.7）', async () => {
     expect(isWatchedToday(parent, TODAY)).toBe(true);
   });
 });
+
+describe('なまえ（§10.5）', async () => {
+  const { isValidParentName, nameDoneText, FAMILY_COMMANDS } = await import('../src/family');
+  it('呼び名は1〜10文字、改行なし', () => {
+    expect(isValidParentName('お母さん')).toBe(true);
+    expect(isValidParentName('あいうえおかきくけこ')).toBe(true);
+    expect(isValidParentName('あいうえおかきくけこさ')).toBe(false);
+    expect(isValidParentName('')).toBe(false);
+    expect(isValidParentName('お母\nさん')).toBe(false);
+  });
+  it('呼び名の入力待ちでも、決まった言葉は操作として扱う', () => {
+    expect(FAMILY_COMMANDS).toContain('ようす');
+    expect(FAMILY_COMMANDS).toContain('なまえ');
+  });
+  it('変更の結果を返す', () => {
+    expect(nameDoneText('はなこさん', 'お母さん')).toBe('呼び名を「はなこさん」から「お母さん」に変えました。');
+  });
+  it('親を選ぶボタンを読み戻せる', () => {
+    expect(decodeAction(encodeAction({ a: 'name', p: 3 }, NOW), NOW)).toEqual({ a: 'name', p: 3 });
+  });
+});

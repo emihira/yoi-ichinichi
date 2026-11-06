@@ -563,3 +563,8 @@ export async function setParentBlocked(db: D1Database, parentId: number, blocked
     .run();
   return r.meta.changes === 1;
 }
+
+/** 親の呼び名を変える（§10.5） */
+export async function setParentName(db: D1Database, parentId: number, name: string): Promise<void> {
+  await db.prepare(`UPDATE users SET display_name = ? WHERE id = ? AND role = 'parent'`).bind(name, parentId).run();
+}

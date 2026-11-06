@@ -27,6 +27,7 @@ import {
   resetUnwellNotice,
   setConversation,
   setParentBlocked,
+  setParentName,
   setPauseUntil,
   setSendTime,
   toParentInfo,
@@ -36,6 +37,10 @@ import {
 import type { Env } from './env';
 import {
   ACTION_EXPIRED,
+  askNameText,
+  FAMILY_COMMANDS,
+  isValidParentName,
+  nameDoneText,
   chooseHourMessage,
   chooseMinuteMessage,
   chooseParentMessage,
@@ -89,7 +94,6 @@ import { monthlyUsage, notifyFamily, remindersSuspended, runDemo, syncLineUsage,
 export const MAX_PARENTS = 2;
 export const MAX_FAMILY = 3;
 const CONVERSATION_TTL_MS = 10 * MINUTE_MS;
-const PARENT_NAME_MAX = 10;
 
 /** デモ用コマンド（§16.2）。「デモ:朝」のような半角コロンも受け付ける */
 const DEMO_COMMANDS: Record<string, DemoCommand> = {
@@ -342,12 +346,24 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   const conv = await getConversation(ctx.db, user.line_user_id, ctx.now);
   if (conv?.operation === 'invite_parent_name' && isAdmin) {
     await clearConversation(ctx.db, user.line_user_id);
-    if (input.length === 0 || [...input].length > PARENT_NAME_MAX || /[\r\n]/.test(input)) {
+    if (!isValidParentName(input)) {
       await reply(ctx, event, text('呼び名は10文字までにしてください。もう一度「しょうたい」から始めてください。'));
       return;
     }
     return issueInvite(ctx, event, user, 'parent', input);
   }
+
+  if (conv?.operation === 'rename_parent' && conv.parent_id !== null && !FAMILY_COMMANDS.includes(input)) {
+    await clearConversation(ctx.db, user.line_user_id);
+    const parent = await getParentById(ctx.db, conv.parent_id);
+    if (!parent) return void (await reply(ctx, event, text('親御さんが見つかりませんでした。')));
+    if (!isValidParentName(input)) {
+      return void (await reply(ctx, event, text('呼び名は10文字までにしてください。もう一度「なまえ」から始めてください。')));
+    }
+    await setParentName(ctx.db, parent.id, input);
+    return void (await reply(ctx, event, text(nameDoneText(honorific(parent.display_name ?? 'ご家族'), honorific(input)))));
+  }
+  if (conv?.operation === 'rename_parent') await clearConversation(ctx.db, user.line_user_id); // 別の操作を始めたら取りやめ
 
   // 家族が親用の登録リンクを押してしまった場合
   if (extractInviteCodes(input).length > 0) {
@@ -373,7 +389,8 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
       return startFamilyAction(ctx, event, 'どなたの見守りを再開しますか？', (p) => ({ a: 'resume', p }));
     case 'じかん':
       return startFamilyAction(ctx, event, 'どなたの朝のメッセージの時刻を変えますか？', (p) => ({ a: 'time', p }));
-    // TODO：なまえ
+    case 'なまえ':
+      return startFamilyAction(ctx, event, 'どなたの呼び名を変えますか？', (p) => ({ a: 'name', p }));
   }
   await reply(ctx, event, usageText(isAdmin));
 }
@@ -413,6 +430,12 @@ async function familyAction(ctx: Ctx, event: LineEvent, action: FamilyAction): P
       const outcome = resumeOutcome(info, ctx.today);
       if (outcome === 'resume_tomorrow') await setPauseUntil(ctx.db, parent.id, ctx.today);
       return void (await reply(ctx, event, text(resumeText(choice.name, outcome, ctx.today))));
+    }
+    case 'name': {
+      const lineUserId = event.source?.userId;
+      if (!lineUserId) return;
+      await setConversation(ctx.db, lineUserId, 'rename_parent', parent.id, ctx.now + CONVERSATION_TTL_MS);
+      return void (await reply(ctx, event, text(askNameText(choice.name))));
     }
     case 'time':
       return void (await reply(ctx, event, chooseHourMessage(choice, info.sendTime, ctx.now)));
