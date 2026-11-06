@@ -166,7 +166,7 @@ export function usageText(isAdmin: boolean): LineMessage {
     'なまえ：親御さんの呼び名を変える',
     'つかいかた：この案内',
   ];
-  if (isAdmin) lines.push('', '（管理者のみ）', 'しょうたい：ご家族・親御さんを招待');
+  if (isAdmin) lines.push('', '（管理者のみ）', 'しょうたい：ご家族・親御さんを招待', 'メンバー：登録している人の一覧と削除');
   return text(lines.join('\n'));
 }
 

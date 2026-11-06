@@ -568,3 +568,30 @@ export async function setParentBlocked(db: D1Database, parentId: number, blocked
 export async function setParentName(db: D1Database, parentId: number, name: string): Promise<void> {
   await db.prepare(`UPDATE users SET display_name = ? WHERE id = ? AND role = 'parent'`).bind(name, parentId).run();
 }
+
+// ---- メンバー（§9.8） ----
+
+export async function listMembers(db: D1Database): Promise<UserRow[]> {
+  const r = await db.prepare(`SELECT * FROM users WHERE status != 'removed' ORDER BY role DESC, id`).all<UserRow>();
+  return r.results;
+}
+
+export async function getUserById(db: D1Database, id: number): Promise<UserRow | null> {
+  return db.prepare(`SELECT * FROM users WHERE id = ? AND status != 'removed'`).bind(id).first<UserRow>();
+}
+
+/**
+ * 登録者を削除する（管理者は削除できない）。
+ * 個人情報を残さないよう、その人の記録もまとめて消す。同じ人を後で招待し直すこともできる。削除できたら true
+ */
+export async function deleteMember(db: D1Database, user: UserRow): Promise<boolean> {
+  if (user.is_admin === 1) return false;
+  const results = await db.batch([
+    db.prepare(`DELETE FROM inputs WHERE parent_id = ?`).bind(user.id),
+    db.prepare(`DELETE FROM daily_status WHERE parent_id = ?`).bind(user.id),
+    db.prepare(`DELETE FROM notification_failures WHERE target_user = ?`).bind(user.id),
+    db.prepare(`DELETE FROM conversation_state WHERE line_user_id = ? OR parent_id = ?`).bind(user.line_user_id, user.id),
+    db.prepare(`DELETE FROM users WHERE id = ? AND is_admin = 0`).bind(user.id),
+  ]);
+  return (results[4]?.meta.changes ?? 0) === 1;
+}

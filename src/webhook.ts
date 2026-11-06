@@ -14,6 +14,9 @@ import {
   getDay,
   getDaysRange,
   getParentById,
+  getUserById,
+  deleteMember,
+  listMembers,
   getUserByLineId,
   insertInput,
   insertUser,
@@ -38,6 +41,9 @@ import type { Env } from './env';
 import {
   ACTION_EXPIRED,
   askNameText,
+  memberDeleteConfirm,
+  memberListMessage,
+  type Member,
   FAMILY_COMMANDS,
   isValidParentName,
   nameDoneText,
@@ -326,7 +332,12 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
     const data = event.postback?.data ?? '';
     const action = decodeAction(data, ctx.now);
     if (action === 'expired') return void (await reply(ctx, event, text(ACTION_EXPIRED)));
+    if (action && (action.a === 'member_del' || action.a === 'member_del_ok')) {
+      if (isAdmin) return memberAction(ctx, event, action);
+      return;
+    }
     if (action) return familyAction(ctx, event, action);
+    if (data === 'action=member_cancel') return void (await reply(ctx, event, text('削除をやめました。')));
     if (isAdmin && data === 'action=invite_family') return issueInvite(ctx, event, user, 'family', null);
     if (isAdmin && data === 'action=invite_parent') {
       if ((await countUsers(ctx.db, 'parent')) >= MAX_PARENTS) {
@@ -380,6 +391,9 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   switch (input) {
     case 'ようす':
       return void (await reply(ctx, event, text(await statusText(ctx, isAdmin))));
+    case 'メンバー':
+      if (isAdmin) return showMembers(ctx, event);
+      break;
     case 'しょうたい':
       if (isAdmin) return void (await reply(ctx, event, inviteChoice()));
       break;
@@ -450,6 +464,32 @@ async function familyAction(ctx: Ctx, event: LineEvent, action: FamilyAction): P
       return void (await reply(ctx, event, text(sendTimeDoneText(choice.name, action.v, apply, ctx.today, toJst(ctx.now).minutes, watched))));
     }
   }
+}
+
+/** メンバー（§9.8）：管理者だけ。家族の名前は LINE の表示名をその場で取得する（保存しない） */
+async function showMembers(ctx: Ctx, event: LineEvent): Promise<void> {
+  const rows = await listMembers(ctx.db);
+  const members: Member[] = [];
+  for (const u of rows) {
+    const name = u.role === 'parent' ? u.display_name : await ctx.line.getDisplayName(u.line_user_id);
+    members.push({ id: u.id, role: u.role, isAdmin: u.is_admin === 1, name });
+  }
+  await reply(ctx, event, memberListMessage(members, ctx.now));
+}
+
+async function memberAction(ctx: Ctx, event: LineEvent, action: { a: 'member_del' | 'member_del_ok'; p: number }): Promise<void> {
+  const target = await getUserById(ctx.db, action.p);
+  if (!target) return void (await reply(ctx, event, text('その方は見つかりませんでした。すでに削除されているかもしれません。')));
+  if (target.is_admin === 1) return void (await reply(ctx, event, text('管理者は削除できません。')));
+  const label =
+    target.role === 'parent'
+      ? honorific(target.display_name ?? 'ご家族')
+      : ((await ctx.line.getDisplayName(target.line_user_id)) ?? 'このご家族');
+  if (action.a === 'member_del') {
+    return void (await reply(ctx, event, memberDeleteConfirm(label, target.role, target.id, ctx.now)));
+  }
+  const ok = await deleteMember(ctx.db, target);
+  await reply(ctx, event, text(ok ? `${label}を削除しました。空いた枠に、新しく招待できます。` : '削除できませんでした。もう一度「メンバー」から試してください。'));
 }
 
 /** 招待コードを発行する（§9.3）。親の場合は、押して送信するだけの登録用リンクも付ける（§9.5） */

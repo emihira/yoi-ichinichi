@@ -24,6 +24,8 @@ export interface LineClient {
   push(to: string, messages: LineMessage[], retryKey: string): Promise<PushResult>;
   /** 今月の上限と消費数（§11.2）。取得できなかった値は null */
   getUsage(): Promise<{ quota: number | null; used: number | null }>;
+  /** LINE の表示名（「メンバー」の一覧用。保存はしない）。取れなければ null */
+  getDisplayName(userId: string): Promise<string | null>;
 }
 
 export function createLineClient(accessToken: string, fetchImpl: typeof fetch = fetch): LineClient {
@@ -69,6 +71,17 @@ export function createLineClient(accessToken: string, fetchImpl: typeof fetch = 
       // 400番台（宛先の間違いなど）は再試行しても直らないが、通信エラーと5xx・429は1回だけやり直す
       if (first.status >= 400 && first.status < 500 && first.status !== 429) return first;
       return { ...(await send()), retried: true };
+    },
+
+    async getDisplayName(userId) {
+      try {
+        const res = await fetchImpl(`${API}/profile/${encodeURIComponent(userId)}`, { headers: { Authorization: headers.Authorization } });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { displayName?: unknown };
+        return typeof body.displayName === 'string' ? body.displayName : null;
+      } catch {
+        return null;
+      }
     },
 
     async getUsage() {

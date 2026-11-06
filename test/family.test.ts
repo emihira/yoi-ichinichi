@@ -135,3 +135,29 @@ describe('なまえ（§10.5）', async () => {
     expect(decodeAction(encodeAction({ a: 'name', p: 3 }, NOW), NOW)).toEqual({ a: 'name', p: 3 });
   });
 });
+
+describe('メンバー（§9.8）', async () => {
+  const { memberListMessage, memberDeleteConfirm } = await import('../src/family');
+  const members = [
+    { id: 1, role: 'family' as const, isAdmin: true, name: 'えみ' },
+    { id: 2, role: 'parent' as const, isAdmin: false, name: 'はなこ' },
+    { id: 4, role: 'family' as const, isAdmin: false, name: null },
+  ];
+  it('一覧を表示し、管理者以外だけ削除ボタンを出す', () => {
+    const m = memberListMessage(members, NOW);
+    expect(m.text).toContain('・はなこさん');
+    expect(m.text).toContain('・えみ（管理者）');
+    expect(m.text).toContain('・ご家族2');
+    const labels = items(m).map((i) => i.action.label);
+    expect(labels).toEqual(['削除：はなこさん', '削除：ご家族2']);
+    expect(decodeAction(items(m)[0]!.action.data, NOW)).toEqual({ a: 'member_del', p: 2 });
+  });
+  it('管理者しかいなければ、削除ボタンは出さない', () => {
+    expect(memberListMessage([members[0]!], NOW).quickReply).toBeUndefined();
+  });
+  it('削除の前に確認ボタンを出す', () => {
+    const m = memberDeleteConfirm('はなこさん', 'parent', 2, NOW);
+    expect(items(m).map((i) => i.action.label)).toEqual(['削除する', 'やめる']);
+    expect(decodeAction(items(m)[0]!.action.data, NOW)).toEqual({ a: 'member_del_ok', p: 2 });
+  });
+});

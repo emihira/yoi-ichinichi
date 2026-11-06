@@ -14,12 +14,14 @@ export type FamilyAction =
   | { a: 'pause'; p: number } // 親を選んだ → 終了日のカレンダーへ
   | { a: 'pause_until'; p: number } // カレンダーで日付を選んだ（日付は postback.params.date）
   | { a: 'resume'; p: number }
-  | { a: 'name'; p: number } // 親を選んだ → 新しい呼び名を送ってもらう
+  | { a: 'name'; p: number }
+  | { a: 'member_del'; p: number } // 管理者：削除する人を選んだ → 確認（p は登録者のID）
+  | { a: 'member_del_ok'; p: number } // 管理者：削除を確定 // 親を選んだ → 新しい呼び名を送ってもらう
   | { a: 'time'; p: number } // 親を選んだ → 時を選ぶ
   | { a: 'time_h'; p: number; h: number } // 時を選んだ → 分を選ぶ
   | { a: 'time_set'; p: number; v: string }; // 時刻が決まった
 
-const ACTIONS = ['pause', 'pause_until', 'resume', 'name', 'time', 'time_h', 'time_set'] as const;
+const ACTIONS = ['pause', 'pause_until', 'resume', 'name', 'member_del', 'member_del_ok', 'time', 'time_h', 'time_set'] as const;
 
 /** ボタンに入れる文字列を作る。t はボタンを作った時刻 */
 export function encodeAction(action: FamilyAction, t: number): string {
@@ -51,7 +53,7 @@ export function decodeAction(data: string, now: number): FamilyAction | 'expired
       return isValidSendTime(v) ? { a, p, v } : null;
     }
     default:
-      return { a: a as 'pause' | 'pause_until' | 'resume' | 'name' | 'time', p };
+      return { a: a as 'pause' | 'pause_until' | 'resume' | 'name' | 'member_del' | 'member_del_ok' | 'time', p };
   }
 }
 
@@ -211,4 +213,61 @@ export function askNameText(name: string): string {
 
 export function nameDoneText(oldName: string, newName: string): string {
   return `呼び名を「${oldName}」から「${newName}」に変えました。`;
+}
+
+// ---- メンバー（§9.8） ----
+
+export interface Member {
+  id: number;
+  role: 'parent' | 'family';
+  isAdmin: boolean;
+  /** 親は呼び名、家族は LINE の表示名（取れなければ null） */
+  name: string | null;
+}
+
+export function memberLabel(m: Member, index: number): string {
+  if (m.role === 'parent') return honorific(m.name ?? 'ご家族');
+  return m.name ?? `ご家族${index + 1}`;
+}
+
+/** 一覧と、削除する人を選ぶボタン（管理者自身は削除できない） */
+export function memberListMessage(members: Member[], now: number): LineMessage {
+  const family = members.filter((m) => m.role === 'family');
+  const parents = members.filter((m) => m.role === 'parent');
+  const lines = ['【登録している人】', '', '親御さん：'];
+  lines.push(...(parents.length ? parents.map((m, i) => `・${memberLabel(m, i)}`) : ['・まだいません']));
+  lines.push('', 'ご家族：');
+  lines.push(...family.map((m, i) => `・${memberLabel(m, i)}${m.isAdmin ? '（管理者）' : ''}`));
+  const deletable = [...parents.map((m, i) => ({ m, label: memberLabel(m, i) })), ...family.map((m, i) => ({ m, label: memberLabel(m, i) }))].filter(
+    (x) => !x.m.isAdmin,
+  );
+  if (deletable.length === 0) return { type: 'text', text: lines.join('\n') };
+  lines.push('', '削除するときは、下のボタンから選んでください。');
+  return {
+    type: 'text',
+    text: lines.join('\n'),
+    quickReply: {
+      items: deletable.map((x) =>
+        postbackItem(`削除：${[...x.label].slice(0, 14).join('')}`, encodeAction({ a: 'member_del', p: x.m.id }, now), `${x.label}を削除`),
+      ),
+    },
+  };
+}
+
+/** 削除の確認（§9.8：削除前に確認ボタンを表示する） */
+export function memberDeleteConfirm(label: string, role: 'parent' | 'family', id: number, now: number): LineMessage {
+  const effect =
+    role === 'parent'
+      ? 'この親御さんへの朝のメッセージを止め、これまでの記録も消します。'
+      : 'この方には、お知らせが届かなくなります。';
+  return {
+    type: 'text',
+    text: `${label}を削除しますか？\n${effect}\n削除したあとも、もう一度招待すれば登録できます。`,
+    quickReply: {
+      items: [
+        postbackItem('削除する', encodeAction({ a: 'member_del_ok', p: id }, now)),
+        postbackItem('やめる', 'action=member_cancel', 'やめる'),
+      ],
+    },
+  };
 }
