@@ -91,7 +91,7 @@ Webhook URL は「LINE にメッセージが届いたとき、知らせる先」
 
 1. LINE Developers コンソール → チャネル → **「Messaging API設定」** タブ
 2. 「Webhook設定」の **「編集」** を押し、次を入れて「更新」
-   `https://yoi-ichinichi.<あなたのサブドメイン>.workers.dev/webhook`
+   `https://<wrangler.toml の name>.<あなたのサブドメイン>.workers.dev/webhook`
    （プログラムを公開したとき、ターミナルに表示される URL の末尾に `/webhook` を付けたもの）
 3. **「検証」** を押し、「成功」と出ることを確認する
 4. **「Webhookの利用」** をオンにする
