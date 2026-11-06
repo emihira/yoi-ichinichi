@@ -161,3 +161,14 @@ describe('メンバー（§9.8）', async () => {
     expect(decodeAction(items(m)[0]!.action.data, NOW)).toEqual({ a: 'member_del_ok', p: 2 });
   });
 });
+
+describe('家族用リッチメニュー（§10.6）', () => {
+  it('4つのボタンが画像の幅をすき間なく分け、決まった言葉を送る', async () => {
+    // 画像の読み込みを含まない、定義だけを確かめる
+    const { familyRichMenu, RICHMENU_COMMANDS } = await import('../src/richmenu-def');
+    const m = familyRichMenu();
+    expect(m.areas.map((a) => a.action.text)).toEqual([...RICHMENU_COMMANDS]);
+    expect(m.areas.reduce((sum, a) => sum + a.bounds.width, 0)).toBe(m.size.width);
+    expect(m.areas.every((a, i) => i === 0 || a.bounds.x === m.areas[i - 1]!.bounds.x + m.areas[i - 1]!.bounds.width)).toBe(true);
+  });
+});

@@ -19,3 +19,9 @@ migrations_dir = "migrations"
 LINE_OA_ID = "@696kjrde"          # LINE公式アカウントのベーシックID（例：@123abcde）
 GREETING_API_URL = "https://yoi-ichinichi-greeting.yoi-ichinichi.workers.dev"    # 共通挨拶文の配信先。空なら予備挨拶文を使う
 DEMO_MODE = "false"
+
+# リッチメニューの画像（assets/*.png）を、プログラムに含めて読み込む（仕様書 §10.6）
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = false

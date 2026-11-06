@@ -92,6 +92,7 @@ import {
 } from './line/messages';
 import { classifyReply, isBeforeNoon, isWatchedToday, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
 import { describeInput, INPUT_NOTICE_INTERVAL_MS, INPUT_RETENTION_DAYS, INPUT_SHOW_MAX, inputLabel, isInputNoticeTarget, type InputKind } from './input';
+import { linkFamilyMenu, unlinkMenu } from './richmenu';
 import { formatParentStatus, STATUS_LEGEND } from './status';
 import { addDays, DEFAULT_SEND_TIME, formatJstClock, MINUTE_MS, toJst } from './time';
 import { REMINDER_STOP_THRESHOLD } from './quota';
@@ -188,6 +189,7 @@ async function handleUnregistered(ctx: Ctx, event: LineEvent, userId: string): P
         text('管理者として登録しました。「しょうたい」と送ると、ご家族や親御さんを招待できます。'),
         text(FAMILY_NOTICE),
       );
+      await linkMenuSafely(ctx, [userId]);
       return;
     }
     // 管理者が登録済みなら、管理者コードは受け付けない（ふつうの未登録者と同じ返事）
@@ -247,6 +249,7 @@ async function redeemInvite(ctx: Ctx, event: LineEvent, userId: string, codes: s
 
   await insertUser(ctx.db, { lineUserId: userId, role: 'family', displayName: null, sendTime: null }, ctx.now, registrationDate(ctx.now));
   await reply(ctx, event, text('ご家族として登録しました。'), text(FAMILY_NOTICE), usageText(false));
+  await linkMenuSafely(ctx, [userId]);
 }
 
 // ---- 親（§5, §6） ----
@@ -391,6 +394,12 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
   switch (input) {
     case 'ようす':
       return void (await reply(ctx, event, text(await statusText(ctx, isAdmin))));
+    case 'メニュー':
+      if (isAdmin) {
+        const n = await linkMenuSafely(ctx);
+        return void (await reply(ctx, event, text(n === null ? 'メニューを付けられませんでした。しばらくしてから、もう一度送ってください。' : `ご家族${n}人の画面の下に、メニューを付けました。`)));
+      }
+      break;
     case 'メンバー':
       if (isAdmin) return showMembers(ctx, event);
       break;
@@ -466,6 +475,16 @@ async function familyAction(ctx: Ctx, event: LineEvent, action: FamilyAction): P
   }
 }
 
+/** 家族用リッチメニューを付ける（§10.6）。失敗しても登録などの処理は止めない。付けた人数（失敗なら null） */
+async function linkMenuSafely(ctx: Ctx, lineUserIds?: string[]): Promise<number | null> {
+  try {
+    return await linkFamilyMenu(ctx.env, lineUserIds);
+  } catch (e) {
+    console.error('リッチメニューを付けられませんでした', String(e));
+    return null;
+  }
+}
+
 /** メンバー（§9.8）：管理者だけ。家族の名前は LINE の表示名をその場で取得する（保存しない） */
 async function showMembers(ctx: Ctx, event: LineEvent): Promise<void> {
   const rows = await listMembers(ctx.db);
@@ -489,6 +508,9 @@ async function memberAction(ctx: Ctx, event: LineEvent, action: { a: 'member_del
     return void (await reply(ctx, event, memberDeleteConfirm(label, target.role, target.id, ctx.now)));
   }
   const ok = await deleteMember(ctx.db, target);
+  if (ok && target.role === 'family') {
+    await unlinkMenu(ctx.env, target.line_user_id).catch((e) => console.error('メニューを外せませんでした', String(e)));
+  }
   await reply(ctx, event, text(ok ? `${label}を削除しました。空いた枠に、新しく招待できます。` : '削除できませんでした。もう一度「メンバー」から試してください。'));
 }
 
