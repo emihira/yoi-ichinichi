@@ -397,7 +397,7 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
     case 'メニュー':
       if (isAdmin) {
         const n = await linkMenuSafely(ctx);
-        return void (await reply(ctx, event, text(n === null ? 'メニューを付けられませんでした。しばらくしてから、もう一度送ってください。' : `ご家族${n}人の画面の下に、メニューを付けました。`)));
+        return void (await reply(ctx, event, text(n === null ? 'メニューを付けられませんでした。しばらくしてから、もう一度送ってください。' : `ご家族${n}人（あなたを含みます）の画面の下に、メニューを付けました。親御さんの画面には付けていません。`)));
       }
       break;
     case 'メンバー':
