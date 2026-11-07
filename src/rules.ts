@@ -149,8 +149,10 @@ export function classifyReply(event: ReplyEventLike): ReplyMethod | null {
 // ---- 不調ボタン（§6） ----
 
 /** 不調通知を家族へ送るか：前回の通知から30分以内なら送らない */
-export function shouldNotifyUnwell(lastNotifiedAt: number | null, now: number): boolean {
-  return lastNotifiedAt === null || now - lastNotifiedAt >= UNWELL_DEBOUNCE_MS;
+export function shouldNotifyUnwell(lastNotifiedAt: number | null, now: number, cancelledAt: number | null = null): boolean {
+  if (lastNotifiedAt === null || now - lastNotifiedAt >= UNWELL_DEBOUNCE_MS) return true;
+  // 取り消したあとに押されたら、30分以内でも新しい通知（家族は「押しまちがい」と思ったままになるため）
+  return cancelledAt !== null && cancelledAt >= lastNotifiedAt;
 }
 
 /** 押し間違いを取り消せるか：通知した日の23:59まで、まだ取り消していなければ */

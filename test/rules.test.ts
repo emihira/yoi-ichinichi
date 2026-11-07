@@ -148,6 +148,11 @@ describe('不調ボタン（§6.4, §6.5）', () => {
   it('30分を過ぎたら新しい通知として送る', () => {
     expect(shouldNotifyUnwell(at, at + 30 * 60_000)).toBe(true);
   });
+  it('取り消したあとに押されたら、30分以内でも新しい通知にする', () => {
+    expect(shouldNotifyUnwell(at, at + 10 * 60_000, at + 5 * 60_000)).toBe(true);
+    // 取り消しのあとの通知（＝まだ有効な通知）への連打は、再通知しない
+    expect(shouldNotifyUnwell(at + 10 * 60_000, at + 20 * 60_000, at + 5 * 60_000)).toBe(false);
+  });
   it('取り消しはその日の23:59まで、1回だけ', () => {
     expect(canCancelUnwell(at, null, jst(TODAY, '23:59'))).toBe(true);
     expect(canCancelUnwell(at, null, jst('2026-11-06', '00:00'))).toBe(false);

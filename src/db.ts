@@ -368,7 +368,9 @@ export async function claimUnwellNotice(
   const r = await db
     .prepare(
       `UPDATE daily_status SET unwell_notified_at = ?
-       WHERE parent_id = ? AND date = ? AND (unwell_notified_at IS NULL OR unwell_notified_at <= ?)`,
+       WHERE parent_id = ? AND date = ?
+         AND (unwell_notified_at IS NULL OR unwell_notified_at <= ?
+              OR (unwell_cancelled_at IS NOT NULL AND unwell_cancelled_at >= unwell_notified_at))`,
     )
     .bind(now, parentId, date, now - debounceMs)
     .run();
