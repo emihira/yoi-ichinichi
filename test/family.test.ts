@@ -115,6 +115,16 @@ describe('親のブロック・友だち削除（§9.7）', async () => {
   });
 });
 
+describe('不調ボタンのあとの返事（§6）', async () => {
+  const { unwellAckMessage } = await import('../src/line/messages');
+  it('119 の案内と、押しまちがえたときの案内があり、ボタンが付く', () => {
+    const m = unwellAckMessage() as { text: string; quickReply: { items: { action: { label: string } }[] } };
+    expect(m.text).toContain('いそぐときは119に電話してください。');
+    expect(m.text).toContain('まちがえて押したときは、この下の［まちがえて押しました］を押してください。');
+    expect(m.quickReply.items[0]!.action.label).toBe('まちがえて押しました');
+  });
+});
+
 describe('なまえ（§10.5）', async () => {
   const { isValidParentName, nameDoneText, FAMILY_COMMANDS } = await import('../src/family');
   it('呼び名は1〜10文字、改行なし', () => {

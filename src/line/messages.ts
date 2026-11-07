@@ -75,7 +75,7 @@ export const THANKS = text('今日も良い一日となりますように');
 export function unwellAckMessage(): LineMessage {
   return {
     type: 'text',
-    text: 'ご家族にお知らせしました。いそぐときは119に電話してください。',
+    text: 'ご家族にお知らせしました。いそぐときは119に電話してください。\n\nまちがえて押したときは、この下の［まちがえて押しました］を押してください。',
     quickReply: {
       items: [
         {
