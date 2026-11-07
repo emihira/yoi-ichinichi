@@ -24,5 +24,6 @@
   },
   "allowScripts": {
     "workerd@1.20261103.1": true
-  }
+  },
+  "license": "MIT"
 }
