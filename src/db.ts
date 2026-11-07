@@ -482,6 +482,57 @@ export async function listRecentInputs(db: D1Database, parentId: number, since: 
   return r.results;
 }
 
+// ---- 声の録音（11/7 の仕様変更。migrations/0004_voice_clips.sql） ----
+
+export async function insertVoiceClip(
+  db: D1Database,
+  parentId: number,
+  receivedAt: number,
+  durationMs: number,
+  contentType: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  await db
+    .prepare(`INSERT INTO voice_clips (parent_id, received_at, duration_ms, content_type, data) VALUES (?, ?, ?, ?, ?)`)
+    .bind(parentId, receivedAt, durationMs, contentType, data)
+    .run();
+}
+
+export interface VoiceClipRow {
+  id: number;
+  received_at: number;
+  duration_ms: number;
+  display_name: string | null;
+}
+
+/** since より新しい録音を、新しい順に limit 件（録音の中身は読まない） */
+export async function listVoiceClips(db: D1Database, since: number, limit: number): Promise<VoiceClipRow[]> {
+  const r = await db
+    .prepare(
+      `SELECT v.id, v.received_at, v.duration_ms, u.display_name
+       FROM voice_clips v JOIN users u ON u.id = v.parent_id
+       WHERE v.received_at >= ? ORDER BY v.received_at DESC LIMIT ?`,
+    )
+    .bind(since, limit)
+    .all<VoiceClipRow>();
+  return r.results;
+}
+
+/** 録音の中身。since より古いもの（保存期間を過ぎたもの）は返さない */
+export async function getVoiceClipData(
+  db: D1Database,
+  id: number,
+  since: number,
+): Promise<{ content_type: string; data: ArrayBuffer } | null> {
+  const r = await db
+    .prepare(`SELECT content_type, data FROM voice_clips WHERE id = ? AND received_at >= ?`)
+    .bind(id, since)
+    .first<{ content_type: string; data: ArrayBuffer | number[] }>();
+  if (!r) return null;
+  const data = r.data instanceof ArrayBuffer ? r.data : new Uint8Array(r.data).buffer;
+  return { content_type: r.content_type, data };
+}
+
 // ---- 送信数の照合と日次メンテナンス（§11, §13.3） ----
 
 export async function getSetting(db: D1Database, key: string): Promise<string | null> {
@@ -513,6 +564,7 @@ export async function deleteExpired(
     ['notification_failures', db.prepare(`DELETE FROM notification_failures WHERE failed_at < ?`).bind(c.failuresBefore)],
     ['processed_events', db.prepare(`DELETE FROM processed_events WHERE processed_at < ?`).bind(c.weekBefore)],
     ['inputs', db.prepare(`DELETE FROM inputs WHERE received_at < ?`).bind(c.weekBefore)],
+    ['voice_clips', db.prepare(`DELETE FROM voice_clips WHERE received_at < ?`).bind(c.weekBefore)],
     ['invite_attempts', db.prepare(`DELETE FROM invite_attempts WHERE attempted_at < ?`).bind(c.weekBefore)],
     [
       'invites',
@@ -588,10 +640,11 @@ export async function deleteMember(db: D1Database, user: UserRow): Promise<boole
   if (user.is_admin === 1) return false;
   const results = await db.batch([
     db.prepare(`DELETE FROM inputs WHERE parent_id = ?`).bind(user.id),
+    db.prepare(`DELETE FROM voice_clips WHERE parent_id = ?`).bind(user.id),
     db.prepare(`DELETE FROM daily_status WHERE parent_id = ?`).bind(user.id),
     db.prepare(`DELETE FROM notification_failures WHERE target_user = ?`).bind(user.id),
     db.prepare(`DELETE FROM conversation_state WHERE line_user_id = ? OR parent_id = ?`).bind(user.line_user_id, user.id),
     db.prepare(`DELETE FROM users WHERE id = ? AND is_admin = 0`).bind(user.id),
   ]);
-  return (results[4]?.meta.changes ?? 0) === 1;
+  return (results[5]?.meta.changes ?? 0) === 1;
 }

@@ -200,7 +200,7 @@ export const ACTION_EXPIRED =
 export const PARENT_NAME_MAX = 10;
 
 /** 家族が送る言葉（呼び名の入力待ちのときに送られたら、呼び名にせず、その操作として扱う） */
-export const FAMILY_COMMANDS = ['ようす', 'おやすみ', 'さいかい', 'じかん', 'なまえ', 'つかいかた', 'しょうたい', 'メンバー'];
+export const FAMILY_COMMANDS = ['ようす', 'おやすみ', 'さいかい', 'じかん', 'なまえ', 'つかいかた', 'しょうたい', 'メンバー', 'こえ'];
 
 /** 呼び名として使えるか：1〜10文字、改行なし */
 export function isValidParentName(name: string): boolean {

@@ -6,6 +6,9 @@ import type { Env } from './env';
 import { verifySignature } from './line/signature';
 import { runMaintenance, runWatch, depsFromEnv } from './watch';
 import { handleEvents, type LineEvent } from './webhook';
+import { getVoiceClipData } from './db';
+import { MINUTE_MS } from './time';
+import { VOICE_RETENTION_DAYS, verifyVoiceRequest } from './voice';
 
 const CRON_WATCH = '*/5 20-23,0-3 * * *';
 const CRON_MAINTENANCE = '0 19 * * *';
@@ -13,6 +16,8 @@ const CRON_MAINTENANCE = '0 19 * * *';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // 声の録音を LINE に渡す（署名と期限を確かめる。11/7 の仕様変更）
+    if (request.method === 'GET' && url.pathname.startsWith('/voice/')) return serveVoice(env, url);
     if (request.method !== 'POST' || url.pathname !== '/webhook') {
       return new Response('よい一日のはじまりに', { status: 200 });
     }
@@ -30,7 +35,7 @@ export default {
     }
 
     // LINE にはすぐ 200 を返し、処理は裏で続ける（§13.5）
-    ctx.waitUntil(handleEvents(env, events));
+    ctx.waitUntil(handleEvents(env, events, url.origin));
     return new Response('ok', { status: 200 });
   },
 
@@ -43,3 +48,18 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+async function serveVoice(env: Env, url: URL): Promise<Response> {
+  const now = Date.now();
+  const id = await verifyVoiceRequest(env.LINE_CHANNEL_SECRET, url, now);
+  if (id === null) return new Response('not found', { status: 404 });
+  const clip = await getVoiceClipData(env.DB, id, now - VOICE_RETENTION_DAYS * 24 * 60 * MINUTE_MS);
+  if (!clip) return new Response('not found', { status: 404 });
+  return new Response(clip.data, {
+    headers: {
+      'Content-Type': clip.content_type,
+      'Cache-Control': 'private, no-store',
+      'X-Robots-Tag': 'noindex',
+    },
+  });
+}

@@ -26,6 +26,8 @@ export interface LineClient {
   getUsage(): Promise<{ quota: number | null; used: number | null }>;
   /** LINE の表示名（「メンバー」の一覧用。保存はしない）。取れなければ null */
   getDisplayName(userId: string): Promise<string | null>;
+  /** 受け取ったメッセージの中身（声の録音など）。取れなければ null */
+  getContent(messageId: string, maxBytes: number): Promise<{ data: ArrayBuffer; contentType: string } | null>;
 }
 
 export function createLineClient(accessToken: string, fetchImpl: typeof fetch = fetch): LineClient {
@@ -71,6 +73,21 @@ export function createLineClient(accessToken: string, fetchImpl: typeof fetch = 
       // 400番台（宛先の間違いなど）は再試行しても直らないが、通信エラーと5xx・429は1回だけやり直す
       if (first.status >= 400 && first.status < 500 && first.status !== 429) return first;
       return { ...(await send()), retried: true };
+    },
+
+    async getContent(messageId, maxBytes) {
+      try {
+        const res = await fetchImpl(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
+          headers: { Authorization: headers.Authorization },
+        });
+        // 200 以外（準備中の 202 や、期限切れの 404 など）は保存しない
+        if (res.status !== 200) return null;
+        const data = await res.arrayBuffer();
+        if (data.byteLength === 0 || data.byteLength > maxBytes) return null;
+        return { data, contentType: res.headers.get('content-type') ?? 'audio/m4a' };
+      } catch {
+        return null;
+      }
     },
 
     async getDisplayName(userId) {

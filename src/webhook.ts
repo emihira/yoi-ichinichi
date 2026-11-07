@@ -19,6 +19,8 @@ import {
   listMembers,
   getUserByLineId,
   insertInput,
+  insertVoiceClip,
+  listVoiceClips,
   insertUser,
   listRecentInputs,
   listParentsForStatus,
@@ -91,6 +93,7 @@ import {
   usageText,
 } from './line/messages';
 import { classifyReply, isBeforeNoon, isWatchedToday, POSTBACK_UNWELL_CANCEL, registrationDate, UNWELL_DEBOUNCE_MS } from './rules';
+import { audioMessage, VOICE_LIST_MAX, VOICE_MAX_BYTES, VOICE_RETENTION_DAYS, voiceListText, voiceUrl } from './voice';
 import { describeInput, INPUT_NOTICE_INTERVAL_MS, INPUT_RETENTION_DAYS, INPUT_SHOW_MAX, inputLabel, isInputNoticeTarget, type InputKind } from './input';
 import { linkFamilyMenu, unlinkMenu } from './richmenu';
 import { formatParentStatus, STATUS_LEGEND } from './status';
@@ -116,22 +119,25 @@ export interface LineEvent {
   webhookEventId: string;
   replyToken?: string;
   source?: { type: string; userId?: string };
-  message?: { type: string; text?: string; duration?: number };
+  message?: { id?: string; type: string; text?: string; duration?: number };
   postback?: { data: string; params?: { date?: string } };
 }
 
 interface Ctx {
   env: Env;
+  /** この Worker の URL（https://<name>.<サブドメイン>.workers.dev）。録音を渡す URL に使う */
+  origin: string;
   db: D1Database;
   line: LineClient;
   now: number;
   today: string;
 }
 
-export async function handleEvents(env: Env, events: LineEvent[]): Promise<void> {
+export async function handleEvents(env: Env, events: LineEvent[], origin: string): Promise<void> {
   const now = Date.now();
   const ctx: Ctx = {
     env,
+    origin,
     db: env.DB,
     line: createLineClient(env.LINE_CHANNEL_ACCESS_TOKEN),
     now,
@@ -276,6 +282,37 @@ async function handleParent(ctx: Ctx, event: LineEvent, parent: UserRow): Promis
   }
 
   if (input) await notifyInput(ctx, parent, input.kind);
+  // 声の録音は、お礼と通知のあとで保存する（返事を遅らせない）。失敗しても見守りには影響しない
+  if (input?.kind === 'voice') await saveVoiceClip(ctx, event, parent);
+}
+
+/** 声の録音を保存する（11/7 の仕様変更。管理者が「こえ」で聞ける。7日で消す） */
+async function saveVoiceClip(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
+  const id = event.message?.id;
+  if (!id) return;
+  try {
+    const clip = await ctx.line.getContent(id, VOICE_MAX_BYTES);
+    if (!clip) return console.error('声の録音を取り出せませんでした');
+    await insertVoiceClip(ctx.db, parent.id, ctx.now, event.message?.duration ?? 0, clip.contentType, clip.data);
+  } catch (e) {
+    console.error('声の録音の保存でエラー', e);
+  }
+}
+
+/** 「こえ」（管理者のみ）：最近の声のお返事を、LINE の音声メッセージで返す */
+async function replyVoiceClips(ctx: Ctx, event: LineEvent): Promise<void> {
+  const since = ctx.now - VOICE_RETENTION_DAYS * 24 * 60 * MINUTE_MS;
+  const clips = await listVoiceClips(ctx.db, since, VOICE_LIST_MAX);
+  const list = text(
+    voiceListText(
+      clips.map((c) => ({ name: honorific(c.display_name ?? 'ご家族'), receivedAt: c.received_at, durationMs: c.duration_ms })),
+      ctx.today,
+    ),
+  );
+  const audios = await Promise.all(
+    clips.map(async (c) => audioMessage(await voiceUrl(ctx.env.LINE_CHANNEL_SECRET, ctx.origin, c.id, ctx.now), c.duration_ms)),
+  );
+  await reply(ctx, event, list, ...audios);
 }
 
 /**
@@ -402,6 +439,9 @@ async function handleFamily(ctx: Ctx, event: LineEvent, user: UserRow): Promise<
       break;
     case 'メンバー':
       if (isAdmin) return showMembers(ctx, event);
+      break;
+    case 'こえ':
+      if (isAdmin) return replyVoiceClips(ctx, event);
       break;
     case 'しょうたい':
       if (isAdmin) return void (await reply(ctx, event, inviteChoice()));
