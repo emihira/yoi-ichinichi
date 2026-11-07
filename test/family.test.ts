@@ -116,11 +116,17 @@ describe('親のブロック・友だち削除（§9.7）', async () => {
 });
 
 describe('不調ボタンのあとの返事（§6）', async () => {
-  const { unwellAckMessage } = await import('../src/line/messages');
+  const { unwellAckMessage, unwellRecentlySentMessage } = await import('../src/line/messages');
   it('119 の案内と、押しまちがえたときの案内があり、ボタンが付く', () => {
     const m = unwellAckMessage() as { text: string; quickReply: { items: { action: { label: string } }[] } };
     expect(m.text).toContain('いそぐときは119に電話してください。');
     expect(m.text).toContain('まちがえて押したときは、この下の［まちがえて押しました］を押してください。');
+    expect(m.quickReply.items[0]!.action.label).toBe('まちがえて押しました');
+  });
+  it('続けて押したときの返事にも、取り消しの案内とボタンが付く（前のボタンは消えるため）', () => {
+    const m = unwellRecentlySentMessage() as { text: string; quickReply: { items: { action: { label: string } }[] } };
+    expect(m.text).toContain('さきほどご家族にお知らせしました。');
+    expect(m.text).toContain('まちがえて押したときは');
     expect(m.quickReply.items[0]!.action.label).toBe('まちがえて押しました');
   });
 });

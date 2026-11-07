@@ -72,10 +72,11 @@ function button(label: string, data: string, displayText: string, style: 'primar
 
 export const THANKS = text('今日も良い一日となりますように');
 
-export function unwellAckMessage(): LineMessage {
+/** 押しまちがいの案内と［まちがえて押しました］ボタンを付ける（§6.5）。連打のあとでも取り消せるように */
+function withUnwellCancel(body: string): LineMessage {
   return {
     type: 'text',
-    text: 'ご家族にお知らせしました。いそぐときは119に電話してください。\n\nまちがえて押したときは、この下の［まちがえて押しました］を押してください。',
+    text: `${body}\n\nまちがえて押したときは、この下の［まちがえて押しました］を押してください。`,
     quickReply: {
       items: [
         {
@@ -92,12 +93,16 @@ export function unwellAckMessage(): LineMessage {
   };
 }
 
+export function unwellAckMessage(): LineMessage {
+  return withUnwellCancel('ご家族にお知らせしました。いそぐときは119に電話してください。');
+}
+
 export const UNWELL_ALL_FAILED = text(
   'お知らせがとどきませんでした。ご家族に電話してください。いそぐときは119に電話してください。',
 );
-export const UNWELL_RECENTLY_SENT = text(
-  'さきほどご家族にお知らせしました。いそぐときは119に電話してください。',
-);
+export function unwellRecentlySentMessage(): LineMessage {
+  return withUnwellCancel('さきほどご家族にお知らせしました。いそぐときは119に電話してください。');
+}
 
 // ---- 家族への通知 ----
 

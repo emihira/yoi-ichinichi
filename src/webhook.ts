@@ -88,7 +88,7 @@ import {
   THANKS,
   UNWELL_ALL_FAILED,
   UNWELL_CANCELLED,
-  UNWELL_RECENTLY_SENT,
+  unwellRecentlySentMessage,
   unwellAckMessage,
   usageText,
 } from './line/messages';
@@ -339,7 +339,7 @@ async function notifyInput(ctx: Ctx, parent: UserRow, kind: InputKind): Promise<
 /** 不調ボタン：家族全員へ即時通知（§6）。時間帯に関係なく有効 */
 async function notifyUnwell(ctx: Ctx, event: LineEvent, parent: UserRow): Promise<void> {
   if (!(await claimUnwellNotice(ctx.db, parent.id, ctx.today, ctx.now, UNWELL_DEBOUNCE_MS))) {
-    await reply(ctx, event, UNWELL_RECENTLY_SENT); // 30分以内の連打
+    await reply(ctx, event, unwellRecentlySentMessage()); // 30分以内の連打
     return;
   }
   const name = parent.display_name ?? 'ご家族';
